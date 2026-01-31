@@ -4,7 +4,7 @@ namespace Jalium.UI;
 /// Represents an object that participates in the dependency property system.
 /// This is the base class for all objects that support dependency properties.
 /// </summary>
-public class DependencyObject
+public class DependencyObject : DispatcherObject
 {
     private readonly Dictionary<DependencyProperty, object?> _values = new();
     private readonly Dictionary<DependencyProperty, object?> _localValues = new();
