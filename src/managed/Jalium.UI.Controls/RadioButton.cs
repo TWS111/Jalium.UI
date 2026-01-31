@@ -53,6 +53,8 @@ public class RadioButton : ToggleButton
     /// </summary>
     public RadioButton()
     {
+        // RadioButton has its own OnRender implementation, so use direct content management
+        UseDirectContentManagement();
         RegisterInGroup(GroupName);
     }
 

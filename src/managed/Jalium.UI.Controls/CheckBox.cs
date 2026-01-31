@@ -18,6 +18,8 @@ public class CheckBox : ToggleButton
     /// </summary>
     public CheckBox()
     {
+        // CheckBox has its own OnRender implementation, so use direct content management
+        UseDirectContentManagement();
     }
 
     #endregion
