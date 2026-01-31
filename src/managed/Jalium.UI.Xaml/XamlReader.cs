@@ -277,6 +277,11 @@ public static class XamlReader
             {
                 PostProcessDataTrigger(dataTrigger, context);
             }
+            // Post-process MultiTrigger to convert Condition values based on Property type
+            else if (instance is MultiTrigger multiTrigger)
+            {
+                PostProcessMultiTrigger(multiTrigger, context);
+            }
 
             return instance;
         }
@@ -927,8 +932,10 @@ public static class XamlReader
 
         if (value is string stringValue)
         {
-            // Special handling for DependencyProperty type (for Setter.Property, PropertyTrigger.Property, etc.)
-            if (property.PropertyType == typeof(DependencyProperty))
+            // Special handling for DependencyProperty type (for Setter.Property, PropertyTrigger.Property, Condition.Property, etc.)
+            // Also handle nullable DependencyProperty? type
+            var propertyType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            if (propertyType == typeof(DependencyProperty))
             {
                 // Find the target type from the parent Style
                 var parentStyle = context.FindParent<Style>();
@@ -1104,6 +1111,42 @@ public static class XamlReader
                 trigger.Value = doubleValue;
             }
             // Otherwise leave as string for string comparisons
+        }
+    }
+
+    private static void PostProcessMultiTrigger(MultiTrigger trigger, XamlParserContext context)
+    {
+        // Post-process each condition's Value based on its Property type
+        foreach (var condition in trigger.Conditions)
+        {
+            if (condition.Property == null || condition.Value is not string stringValue)
+                continue;
+
+            var targetType = condition.Property.PropertyType;
+
+            // Check for markup extension first
+            if (MarkupExtensionParser.TryParse(stringValue, condition, typeof(Condition).GetProperty("Value")!, context, out var extensionResult))
+            {
+                if (extensionResult is not BindingExpressionBase)
+                {
+                    condition.Value = extensionResult;
+                }
+                continue;
+            }
+
+            // Convert the string value to the property's type
+            try
+            {
+                var convertedValue = TypeConverterRegistry.ConvertValue(stringValue, targetType);
+                if (convertedValue != null)
+                {
+                    condition.Value = convertedValue;
+                }
+            }
+            catch
+            {
+                // If conversion fails, leave value as string - will be handled at runtime
+            }
         }
     }
 
@@ -1452,6 +1495,8 @@ public static class XamlTypeRegistry
         Register<Setter>(types);
         Register<Trigger>(types);
         Register<PropertyTrigger>(types);
+        Register<MultiTrigger>(types);
+        Register<Condition>(types);
         Register<DataTrigger>(types);
         Register<EventTrigger>(types);
         Register<ControlTemplate>(types);

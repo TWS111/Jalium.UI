@@ -116,6 +116,13 @@ public class FrameworkElement : UIElement
     internal readonly Dictionary<DependencyProperty, object?> _styleOriginalValues = new();
 
     /// <summary>
+    /// Stores original property values before ANY trigger modified them.
+    /// Key is (target element, property), value is (original value, active trigger count).
+    /// Used internally by the trigger system to ensure correct restoration.
+    /// </summary>
+    internal readonly Dictionary<(FrameworkElement, DependencyProperty), (object? OriginalValue, int ActiveCount)> _triggerOriginalValues = new();
+
+    /// <summary>
     /// The implicit style applied to this element based on its type.
     /// </summary>
     private Style? _implicitStyle;
