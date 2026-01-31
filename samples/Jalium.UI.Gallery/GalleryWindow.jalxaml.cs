@@ -52,7 +52,21 @@ public partial class GalleryWindow : Window
         { "listbox", () => new ListBoxPage() },
         { "backdropeffects", () => new BackdropEffectsPage() },
         { "datagrid", () => new DataGridPage() },
-        { "autocompletebox", () => new AutoCompleteBoxPage() }
+        { "autocompletebox", () => new AutoCompleteBoxPage() },
+        { "datepicker", () => new DatePickerPage() },
+        { "colorpicker", () => new ColorPickerPage() },
+        { "expander", () => new ExpanderPage() },
+        { "groupbox", () => new GroupBoxPage() },
+        { "statusbar", () => new StatusBarPage() },
+        { "label", () => new LabelPage() },
+        { "separator", () => new SeparatorPage() },
+        { "hyperlinkbutton", () => new HyperlinkButtonPage() },
+        { "toggleswitch", () => new ToggleSwitchPage() },
+        { "numberbox", () => new NumberBoxPage() },
+        { "repeatbutton", () => new RepeatButtonPage() },
+        { "thumb", () => new ThumbPage() },
+        { "calendar", () => new CalendarPage() },
+        { "infobar", () => new InfoBarPage() }
     };
 
     public GalleryWindow()
@@ -91,10 +105,15 @@ public partial class GalleryWindow : Window
         AddChildItem(controlsGroup, "PasswordBox", "passwordbox");
         AddChildItem(controlsGroup, "ComboBox", "combobox");
         AddChildItem(controlsGroup, "AutoCompleteBox", "autocompletebox");
+        AddChildItem(controlsGroup, "ToggleSwitch", "toggleswitch");
+        AddChildItem(controlsGroup, "NumberBox", "numberbox");
+        AddChildItem(controlsGroup, "RepeatButton", "repeatbutton");
+        AddChildItem(controlsGroup, "HyperlinkButton", "hyperlinkbutton");
 
         // Text (expandable group) - clicking group navigates to category overview
         var textGroup = AddGroupItem("Text", "text");
         AddChildItem(textGroup, "TextBlock", "textblock");
+        AddChildItem(textGroup, "Label", "label");
 
         // Data (expandable group) - data binding features
         var dataGroup = AddGroupItem("Data");
@@ -109,6 +128,9 @@ public partial class GalleryWindow : Window
         AddChildItem(layoutGroup, "DockPanel", "dockpanel");
         AddChildItem(layoutGroup, "WrapPanel", "wrappanel");
         AddChildItem(layoutGroup, "ScrollViewer", "scrollviewer");
+        AddChildItem(layoutGroup, "Expander", "expander");
+        AddChildItem(layoutGroup, "GroupBox", "groupbox");
+        AddChildItem(layoutGroup, "Separator", "separator");
 
         // Navigation (expandable group) - clicking group navigates to category overview
         var navigationGroup = AddGroupItem("Navigation", "navigation");
@@ -123,6 +145,22 @@ public partial class GalleryWindow : Window
         AddChildItem(collectionsGroup, "ListBox", "listbox");
         AddChildItem(collectionsGroup, "TreeView", "treeview");
         AddChildItem(collectionsGroup, "DataGrid", "datagrid");
+        AddChildItem(collectionsGroup, "Calendar", "calendar");
+
+        // Date & Time (expandable group)
+        var dateTimeGroup = AddGroupItem("Date & Time");
+        AddChildItem(dateTimeGroup, "DatePicker", "datepicker");
+        AddChildItem(dateTimeGroup, "Calendar", "calendar");
+
+        // Pickers (expandable group)
+        var pickersGroup = AddGroupItem("Pickers");
+        AddChildItem(pickersGroup, "ColorPicker", "colorpicker");
+
+        // Status & Info (expandable group)
+        var statusGroup = AddGroupItem("Status & Info");
+        AddChildItem(statusGroup, "StatusBar", "statusbar");
+        AddChildItem(statusGroup, "InfoBar", "infobar");
+        AddChildItem(statusGroup, "Thumb", "thumb");
 
         // Effects (expandable group)
         var effectsGroup = AddGroupItem("Effects");

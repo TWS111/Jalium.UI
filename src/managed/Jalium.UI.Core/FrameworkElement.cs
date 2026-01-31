@@ -98,6 +98,13 @@ public class FrameworkElement : UIElement
         DependencyProperty.Register(nameof(Style), typeof(Style), typeof(FrameworkElement),
             new PropertyMetadata(null, OnStyleChanged));
 
+    /// <summary>
+    /// Identifies the Cursor dependency property.
+    /// </summary>
+    public static readonly DependencyProperty CursorProperty =
+        DependencyProperty.Register(nameof(Cursor), typeof(Cursor), typeof(FrameworkElement),
+            new PropertyMetadata(null, null, null, inherits: true));
+
     #endregion
 
     #region Internal Fields
@@ -174,6 +181,30 @@ public class FrameworkElement : UIElement
 
         // Try parent's scope
         return (VisualParent as FrameworkElement)?.FindName(name);
+    }
+
+    #endregion
+
+    #region Property Inheritance
+
+    /// <inheritdoc />
+    public override object? GetValue(DependencyProperty dp)
+    {
+        ArgumentNullException.ThrowIfNull(dp);
+
+        // Check if we have a local value
+        if (HasLocalValue(dp))
+        {
+            return base.GetValue(dp);
+        }
+
+        // For inheriting properties, check parent chain
+        if (dp.DefaultMetadata.Inherits && VisualParent is FrameworkElement parent)
+        {
+            return parent.GetValue(dp);
+        }
+
+        return base.GetValue(dp);
     }
 
     #endregion
@@ -342,6 +373,15 @@ public class FrameworkElement : UIElement
     {
         get => (Style?)GetValue(StyleProperty);
         set => SetValue(StyleProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the cursor that displays when the mouse pointer is over this element.
+    /// </summary>
+    public Cursor? Cursor
+    {
+        get => (Cursor?)GetValue(CursorProperty);
+        set => SetValue(CursorProperty, value);
     }
 
     #endregion

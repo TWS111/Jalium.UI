@@ -16,6 +16,15 @@ public class TextBox : TextBoxBase, IImeSupport
     private List<TextLine> _lines = new();
     private bool _linesDirty = true;
 
+    // Text width measurement cache for accurate selection/caret positioning
+    private Dictionary<string, double> _textWidthCache = new();
+    private string? _cachedFontFamily;
+    private double _cachedFontSize;
+    private int _cachedFontWeight;
+    private int _cachedFontStyle;
+    private int _cachedFontStretch;
+    private const int MaxCacheSize = 256;
+
     // IME support
     private bool _isImeComposing;
     private string _imeCompositionString = string.Empty;
@@ -274,6 +283,9 @@ public class TextBox : TextBoxBase, IImeSupport
         Padding = new Thickness(6, 4, 6, 4);
         FontSize = 14;
 
+        // Set IBeam cursor for text input
+        Cursor = Jalium.UI.Cursors.IBeam;
+
         // Subscribe to IME events
         InputMethod.CompositionStarted += OnImeCompositionStarted;
         InputMethod.CompositionUpdated += OnImeCompositionUpdated;
@@ -346,12 +358,65 @@ public class TextBox : TextBoxBase, IImeSupport
         if (string.IsNullOrEmpty(text))
             return 0;
 
-        // Create a FormattedText to measure the actual width
-        var formattedText = new FormattedText(text, FontFamily ?? "Segoe UI", FontSize);
-        // The Width property should be populated by the rendering system
-        // For now, use a calculation that accounts for variable-width characters
-        // This is a simplified estimation; real implementation would use actual text measurement
-        return EstimateTextWidth(text);
+        var fontFamily = FontFamily ?? "Segoe UI";
+        var fontSize = FontSize > 0 ? FontSize : 14;
+        var fontWeight = FontWeight.ToOpenTypeWeight();
+        var fontStyle = FontStyle.ToOpenTypeStyle();
+        var fontStretch = FontStretch.ToOpenTypeStretch();
+
+        // Check if font settings changed, invalidate cache if so
+        if (_cachedFontFamily != fontFamily ||
+            _cachedFontSize != fontSize ||
+            _cachedFontWeight != fontWeight ||
+            _cachedFontStyle != fontStyle ||
+            _cachedFontStretch != fontStretch)
+        {
+            _textWidthCache.Clear();
+            _cachedFontFamily = fontFamily;
+            _cachedFontSize = fontSize;
+            _cachedFontWeight = fontWeight;
+            _cachedFontStyle = fontStyle;
+            _cachedFontStretch = fontStretch;
+        }
+
+        // Check cache first
+        if (_textWidthCache.TryGetValue(text, out var cachedWidth))
+            return cachedWidth;
+
+        // Use DirectWrite native measurement via FormattedText
+        var formattedText = new FormattedText(text, fontFamily, fontSize)
+        {
+            FontWeight = fontWeight,
+            FontStyle = fontStyle,
+            FontStretch = fontStretch
+        };
+
+        // Measure using native DirectWrite
+        var usedNative = TextMeasurement.MeasureText(formattedText);
+
+        double width;
+        if (usedNative && formattedText.IsMeasured)
+        {
+            // Use accurate native measurement
+            width = formattedText.Width;
+        }
+        else
+        {
+            // Fall back to estimation only when native is unavailable
+            width = EstimateTextWidth(text);
+        }
+
+        // Cache the result (with size limit to prevent memory issues)
+        if (_textWidthCache.Count >= MaxCacheSize)
+        {
+            // Simple eviction: clear half the cache
+            var keysToRemove = _textWidthCache.Keys.Take(MaxCacheSize / 2).ToList();
+            foreach (var key in keysToRemove)
+                _textWidthCache.Remove(key);
+        }
+        _textWidthCache[text] = width;
+
+        return width;
     }
 
     private double EstimateTextWidth(string text)
@@ -745,8 +810,9 @@ public class TextBox : TextBoxBase, IImeSupport
             DrawImeComposition(dc, contentRect, lineHeight);
         }
 
-        // Draw caret
-        if (IsKeyboardFocused && _caretVisible && !IsReadOnly)
+        // Draw caret - always call DrawCaret when focused to keep animation running
+        // DrawCaret will internally check opacity and skip drawing when hidden
+        if (IsFocused && !IsReadOnly)
         {
             DrawCaret(dc, contentRect, lineHeight);
         }
@@ -776,7 +842,8 @@ public class TextBox : TextBoxBase, IImeSupport
         for (int i = 0; i < _lines.Count; i++)
         {
             var line = _lines[i];
-            var y = contentRect.Y + i * lineHeight - _verticalOffset;
+            // Round to pixel boundaries to prevent sub-pixel jittering
+            var y = Math.Round(contentRect.Y + i * lineHeight - _verticalOffset);
 
             // Skip lines outside visible area
             if (y + lineHeight < contentRect.Y || y > contentRect.Y + contentRect.Height)
@@ -806,7 +873,8 @@ public class TextBox : TextBoxBase, IImeSupport
                 x = contentRect.X + contentRect.Width - lineWidth;
             }
 
-            dc.DrawText(formattedText, new Point(x, y));
+            // Round to pixel boundaries to prevent sub-pixel jittering
+            dc.DrawText(formattedText, new Point(Math.Round(x), y));
         }
     }
 
@@ -888,7 +956,8 @@ public class TextBox : TextBoxBase, IImeSupport
         {
             var line = _lines[i];
             var lineEnd = line.StartIndex + line.Length;
-            var y = contentRect.Y + i * lineHeight - _verticalOffset;
+            // Round to pixel boundaries to prevent sub-pixel jittering
+            var y = Math.Round(contentRect.Y + i * lineHeight - _verticalOffset);
 
             // Skip lines outside visible area
             if (y + lineHeight < contentRect.Y || y > contentRect.Y + contentRect.Height)
@@ -907,8 +976,9 @@ public class TextBox : TextBoxBase, IImeSupport
                     var selectedText = lineText.Substring(startInLine, endInLine - startInLine);
 
                     // Use measured text widths for accurate selection positioning
-                    var startX = contentRect.X + MeasureTextWidth(textBefore) - _horizontalOffset;
-                    var width = MeasureTextWidth(selectedText);
+                    // Round to pixel boundaries to prevent sub-pixel jittering
+                    var startX = Math.Round(contentRect.X + MeasureTextWidth(textBefore) - _horizontalOffset);
+                    var width = Math.Round(MeasureTextWidth(selectedText));
 
                     var selRect = new Rect(startX, y, width, lineHeight);
                     dc.DrawRectangle(SelectionBrush, null, selRect);
@@ -918,8 +988,8 @@ public class TextBox : TextBoxBase, IImeSupport
                 if (selectionEnd > lineEnd && i < _lines.Count - 1)
                 {
                     var lineText = text.Substring(line.StartIndex, line.Length);
-                    var startX = contentRect.X + MeasureTextWidth(lineText) - _horizontalOffset;
-                    var selRect = new Rect(startX, y, FontSize * 0.3, lineHeight);
+                    var startX = Math.Round(contentRect.X + MeasureTextWidth(lineText) - _horizontalOffset);
+                    var selRect = new Rect(startX, y, Math.Round(FontSize * 0.3), lineHeight);
                     dc.DrawRectangle(SelectionBrush, null, selRect);
                 }
             }
@@ -933,6 +1003,11 @@ public class TextBox : TextBoxBase, IImeSupport
 
         var text = Text;
         var (lineIndex, columnIndex) = GetLineColumnFromCharIndex(_caretIndex);
+
+        // Ensure valid indices
+        if (lineIndex < 0) lineIndex = 0;
+        if (columnIndex < 0) columnIndex = 0;
+
         var lineText = GetLineTextInternal(lineIndex);
         var textBeforeCaret = lineText.Substring(0, Math.Min(columnIndex, lineText.Length));
 
@@ -969,6 +1044,16 @@ public class TextBox : TextBoxBase, IImeSupport
 
     private void DrawCaret(DrawingContext dc, Rect contentRect, double lineHeight)
     {
+        // Update and get the current caret opacity first (needed for animation to progress)
+        var caretOpacity = UpdateCaretAnimation();
+
+        // Schedule next frame for continuous animation while focused
+        // This is the fallback mechanism in case the timer doesn't work properly
+        if (IsKeyboardFocused && !IsReadOnly)
+        {
+            InvalidateVisual();
+        }
+
         if (CaretBrush == null)
             return;
 
@@ -976,14 +1061,37 @@ public class TextBox : TextBoxBase, IImeSupport
         if (_isImeComposing)
             return;
 
+        // Skip drawing if fully transparent
+        if (caretOpacity < 0.01)
+            return;
+
         var (lineIndex, columnIndex) = GetLineColumnFromCharIndex(_caretIndex);
+
+        // Ensure valid indices
+        if (lineIndex < 0) lineIndex = 0;
+        if (columnIndex < 0) columnIndex = 0;
+
         var lineText = GetLineTextInternal(lineIndex);
         var textBeforeCaret = lineText.Substring(0, Math.Min(columnIndex, lineText.Length));
 
-        var x = contentRect.X + MeasureTextWidth(textBeforeCaret) - _horizontalOffset;
-        var y = contentRect.Y + lineIndex * lineHeight - _verticalOffset;
+        // Round positions to pixel boundaries to prevent sub-pixel jittering
+        var x = Math.Round(contentRect.X + MeasureTextWidth(textBeforeCaret) - _horizontalOffset);
+        var y = Math.Round(contentRect.Y + lineIndex * lineHeight - _verticalOffset);
 
-        var caretPen = new Pen(CaretBrush, 1.5);
+        // Create a brush with the animated opacity
+        Brush caretBrushWithOpacity;
+        if (CaretBrush is SolidColorBrush solidBrush)
+        {
+            var color = solidBrush.Color;
+            var alpha = (byte)(color.A * caretOpacity);
+            caretBrushWithOpacity = new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B));
+        }
+        else
+        {
+            caretBrushWithOpacity = CaretBrush;
+        }
+
+        var caretPen = new Pen(caretBrushWithOpacity, 1.5);
         dc.DrawLine(caretPen, new Point(x, y), new Point(x, y + lineHeight));
     }
 
@@ -1007,6 +1115,10 @@ public class TextBox : TextBoxBase, IImeSupport
 
         var text = Text;
         var maxLength = MaxLength;
+
+        // Ensure caret is within bounds
+        if (_caretIndex < 0) _caretIndex = 0;
+        if (_caretIndex > text.Length) _caretIndex = text.Length;
 
         // Enforce max length
         if (maxLength > 0)
@@ -1050,12 +1162,20 @@ public class TextBox : TextBoxBase, IImeSupport
             var newText = (string)(e.NewValue ?? string.Empty);
 
             // Ensure caret is within bounds
-            if (textBox._caretIndex > newText.Length)
+            if (textBox._caretIndex < 0)
+            {
+                textBox._caretIndex = 0;
+            }
+            else if (textBox._caretIndex > newText.Length)
             {
                 textBox._caretIndex = newText.Length;
             }
 
             // Clear selection if text changed externally
+            if (textBox._selectionStart < 0)
+            {
+                textBox._selectionStart = 0;
+            }
             if (textBox._selectionStart + textBox._selectionLength > newText.Length)
             {
                 textBox._selectionStart = Math.Min(textBox._selectionStart, newText.Length);
@@ -1176,6 +1296,11 @@ public class TextBox : TextBoxBase, IImeSupport
 
         var lineHeight = GetLineHeight();
         var (lineIndex, columnIndex) = GetLineColumnFromCharIndex(_caretIndex);
+
+        // Ensure valid indices
+        if (lineIndex < 0) lineIndex = 0;
+        if (columnIndex < 0) columnIndex = 0;
+
         var lineText = GetLineTextInternal(lineIndex);
         var textBeforeCaret = lineText.Substring(0, Math.Min(columnIndex, lineText.Length));
 

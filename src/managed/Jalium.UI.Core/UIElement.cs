@@ -361,6 +361,9 @@ public abstract partial class UIElement : Visual, IInputElement
     {
         if (_isKeyboardFocused != isFocused)
         {
+            var msg = $"[{DateTime.Now:HH:mm:ss.fff}] [Focus] {GetType().Name}.IsKeyboardFocused: {_isKeyboardFocused} -> {isFocused}";
+            System.Diagnostics.Debug.WriteLine(msg);
+            try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(GetType().Assembly.Location) ?? ".", "focus_debug.log"), msg + Environment.NewLine); } catch { }
             _isKeyboardFocused = isFocused;
             OnIsKeyboardFocusedChanged(isFocused);
             InvalidateVisual();

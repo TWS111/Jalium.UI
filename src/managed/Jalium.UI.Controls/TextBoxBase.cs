@@ -1,3 +1,4 @@
+using System.Timers;
 using Jalium.UI.Input;
 using Jalium.UI.Media;
 
@@ -31,6 +32,16 @@ public abstract class TextBoxBase : Control
     protected bool _caretVisible = true;
 
     /// <summary>
+    /// The current caret opacity (0.0 to 1.0) for smooth animation.
+    /// </summary>
+    protected double _caretOpacity = 1.0;
+
+    /// <summary>
+    /// The start time of the current animation cycle.
+    /// </summary>
+    protected DateTime _caretAnimationStart;
+
+    /// <summary>
     /// The last time the caret blinked.
     /// </summary>
     protected DateTime _lastCaretBlink;
@@ -38,7 +49,22 @@ public abstract class TextBoxBase : Control
     /// <summary>
     /// The caret blink interval in milliseconds.
     /// </summary>
-    protected const int CaretBlinkInterval = 500;
+    protected const int CaretBlinkInterval = 530;
+
+    /// <summary>
+    /// The duration of the fade animation in milliseconds.
+    /// </summary>
+    protected const int CaretFadeDuration = 150;
+
+    /// <summary>
+    /// Timer for caret animation.
+    /// </summary>
+    private System.Timers.Timer? _caretTimer;
+
+    /// <summary>
+    /// Interval for caret animation timer in milliseconds.
+    /// </summary>
+    private const int CaretTimerInterval = 16; // ~60fps for smooth animation
 
     /// <summary>
     /// Whether the user is currently selecting text.
@@ -641,6 +667,13 @@ public abstract class TextBoxBase : Control
             return;
 
         var text = GetText();
+
+        // Ensure selection bounds are valid
+        if (_selectionStart < 0) _selectionStart = 0;
+        if (_selectionStart > text.Length) _selectionStart = text.Length;
+        if (_selectionStart + _selectionLength > text.Length)
+            _selectionLength = text.Length - _selectionStart;
+
         SetText(text.Substring(0, _selectionStart) + text.Substring(_selectionStart + _selectionLength));
         _caretIndex = _selectionStart;
         _selectionLength = 0;
@@ -706,7 +739,84 @@ public abstract class TextBoxBase : Control
     protected void ResetCaretBlink()
     {
         _caretVisible = true;
+        _caretOpacity = 1.0;
         _lastCaretBlink = DateTime.Now;
+        _caretAnimationStart = DateTime.Now;
+    }
+
+    /// <summary>
+    /// Updates the caret animation state and returns the current opacity.
+    /// Call this during rendering to get smooth animated opacity.
+    /// </summary>
+    /// <returns>The current caret opacity (0.0 to 1.0).</returns>
+    protected double UpdateCaretAnimation()
+    {
+        var now = DateTime.Now;
+        var elapsed = (now - _lastCaretBlink).TotalMilliseconds;
+
+        // Full cycle: visible -> fade out -> hidden -> fade in
+        // Total cycle time = (BlinkInterval + FadeDuration) * 2
+        var fullCycleTime = (CaretBlinkInterval + CaretFadeDuration) * 2.0;
+        var timeInCycle = elapsed % fullCycleTime;
+
+        double targetOpacity;
+
+        // Phase boundaries:
+        // 0 to BlinkInterval: fully visible
+        // BlinkInterval to BlinkInterval+FadeDuration: fading out
+        // BlinkInterval+FadeDuration to BlinkInterval*2+FadeDuration: fully hidden
+        // BlinkInterval*2+FadeDuration to fullCycleTime: fading in
+
+        double visibleEnd = CaretBlinkInterval;
+        double fadeOutEnd = CaretBlinkInterval + CaretFadeDuration;
+        double hiddenEnd = CaretBlinkInterval * 2 + CaretFadeDuration;
+        // fadeInEnd = fullCycleTime
+
+        if (timeInCycle < visibleEnd)
+        {
+            // Fully visible phase
+            targetOpacity = 1.0;
+        }
+        else if (timeInCycle < fadeOutEnd)
+        {
+            // Fading out phase
+            double progress = (timeInCycle - visibleEnd) / CaretFadeDuration;
+            targetOpacity = 1.0 - EaseInOutQuad(progress);
+        }
+        else if (timeInCycle < hiddenEnd)
+        {
+            // Fully hidden phase
+            targetOpacity = 0.0;
+        }
+        else
+        {
+            // Fading in phase
+            double progress = (timeInCycle - hiddenEnd) / CaretFadeDuration;
+            targetOpacity = EaseInOutQuad(progress);
+        }
+
+        _caretOpacity = targetOpacity;
+        _caretVisible = _caretOpacity > 0.01;
+
+        return _caretOpacity;
+    }
+
+    /// <summary>
+    /// Ease-in-out quadratic easing function for smooth animation.
+    /// </summary>
+    /// <param name="t">Progress value from 0.0 to 1.0.</param>
+    /// <returns>The eased value from 0.0 to 1.0.</returns>
+    private static double EaseInOutQuad(double t)
+    {
+        t = Math.Clamp(t, 0.0, 1.0);
+        if (t < 0.5)
+        {
+            return 2.0 * t * t;
+        }
+        else
+        {
+            return 1.0 - Math.Pow(-2.0 * t + 2.0, 2) / 2.0;
+        }
     }
 
     /// <summary>
@@ -726,9 +836,13 @@ public abstract class TextBoxBase : Control
 
         var (lineIndex, columnIndex) = GetLineColumnFromCharIndex(_caretIndex);
 
+        // Ensure valid indices
+        if (lineIndex < 0) lineIndex = 0;
+        if (columnIndex < 0) columnIndex = 0;
+
         // Get the text before the caret to measure its width
         var lineText = GetLineTextInternal(lineIndex);
-        var textBeforeCaret = lineText.Substring(0, Math.Min(columnIndex, lineText.Length));
+        var textBeforeCaret = lineText.Substring(0, Math.Max(0, Math.Min(columnIndex, lineText.Length)));
         var caretX = MeasureTextWidth(textBeforeCaret);
         var caretY = lineIndex * lineHeight;
 
@@ -1099,9 +1213,49 @@ public abstract class TextBoxBase : Control
         if (isFocused)
         {
             ResetCaretBlink();
+            StartCaretTimer();
+        }
+        else
+        {
+            StopCaretTimer();
         }
 
         InvalidateVisual();
+    }
+
+    private void StartCaretTimer()
+    {
+        if (IsReadOnly)
+            return;
+
+        if (_caretTimer == null)
+        {
+            _caretTimer = new System.Timers.Timer(CaretTimerInterval);
+            _caretTimer.Elapsed += OnCaretTimerElapsed;
+        }
+
+        _caretTimer.Start();
+    }
+
+    private void StopCaretTimer()
+    {
+        _caretTimer?.Stop();
+    }
+
+    private void OnCaretTimerElapsed(object? sender, ElapsedEventArgs e)
+    {
+        // Request a visual update for caret animation
+        // This runs on a thread pool thread, so InvalidateVisual will
+        // schedule the render on the appropriate thread
+        var hasFocus = IsKeyboardFocused;
+        if (hasFocus && !IsReadOnly)
+        {
+            InvalidateVisual();
+        }
+        else if (!hasFocus)
+        {
+            Input.FocusDebugLog.Log($"[CaretTimer] Skipping InvalidateVisual - IsKeyboardFocused=false");
+        }
     }
 
     #endregion
@@ -1333,8 +1487,12 @@ public abstract class TextBoxBase : Control
             }
 
             var text = GetText();
-            SetText(text.Substring(0, _caretIndex - deleteCount) + text.Substring(_caretIndex));
-            _caretIndex -= deleteCount;
+            var startIndex = Math.Max(0, _caretIndex - deleteCount);
+            SetText(text.Substring(0, startIndex) + text.Substring(_caretIndex));
+            _caretIndex = startIndex;
+
+            // Ensure caret index doesn't go negative
+            if (_caretIndex < 0) _caretIndex = 0;
         }
 
         EnsureCaretVisible();
