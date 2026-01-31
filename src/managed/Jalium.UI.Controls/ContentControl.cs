@@ -57,6 +57,16 @@ public class ContentControl : Control
     }
 
     /// <summary>
+    /// Enables direct content management. Call this in the constructor of controls
+    /// that have their own OnRender implementation (e.g., CheckBox, RadioButton).
+    /// This overrides any parent class's call to UseTemplateContentManagement().
+    /// </summary>
+    protected void UseDirectContentManagement()
+    {
+        _usesDirectContent = true;
+    }
+
+    /// <summary>
     /// Gets whether this control uses direct content management.
     /// Returns true for most controls; false for controls using ControlTemplate.
     /// </summary>

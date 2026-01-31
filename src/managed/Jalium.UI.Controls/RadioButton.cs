@@ -1,6 +1,3 @@
-using Jalium.UI.Interop;
-using Jalium.UI.Media;
-
 namespace Jalium.UI.Controls;
 
 /// <summary>
@@ -45,14 +42,12 @@ public class RadioButton : ToggleButton
 
     #region Constructor
 
-    private const double RadioButtonSize = 18.0;
-    private const double RadioButtonMargin = 8.0;
-
     /// <summary>
     /// Initializes a new instance of the <see cref="RadioButton"/> class.
     /// </summary>
     public RadioButton()
     {
+        // RadioButton uses ControlTemplate for visual appearance (inherited from ButtonBase)
         RegisterInGroup(GroupName);
     }
 
@@ -135,120 +130,6 @@ public class RadioButton : ToggleButton
         }
 
         base.OnIsCheckedChanged(oldValue, newValue);
-    }
-
-    #endregion
-
-    #region Layout
-
-    /// <inheritdoc />
-    protected override Size MeasureOverride(Size availableSize)
-    {
-        var contentSize = MeasureContent(new Size(
-            Math.Max(0, availableSize.Width - RadioButtonSize - RadioButtonMargin),
-            availableSize.Height));
-
-        return new Size(
-            RadioButtonSize + RadioButtonMargin + contentSize.Width,
-            Math.Max(RadioButtonSize, contentSize.Height));
-    }
-
-    private Size MeasureContent(Size availableSize)
-    {
-        if (Content is string text)
-        {
-            var fontFamily = FontFamily ?? "Segoe UI";
-            var fontSize = FontSize > 0 ? FontSize : 14;
-            var formattedText = new FormattedText(text, fontFamily, fontSize);
-            TextMeasurement.MeasureText(formattedText);
-            return new Size(formattedText.Width, formattedText.Height);
-        }
-
-        if (Content is UIElement element)
-        {
-            element.Measure(availableSize);
-            return element.DesiredSize;
-        }
-
-        return new Size(0, 0);
-    }
-
-    /// <inheritdoc />
-    protected override Size ArrangeOverride(Size finalSize)
-    {
-        if (Content is FrameworkElement fe)
-        {
-            var contentRect = new Rect(
-                RadioButtonSize + RadioButtonMargin,
-                0,
-                Math.Max(0, finalSize.Width - RadioButtonSize - RadioButtonMargin),
-                finalSize.Height);
-
-            fe.Arrange(contentRect);
-            // Note: Do NOT call SetVisualBounds here - ArrangeCore already handles margin
-        }
-
-        return finalSize;
-    }
-
-    #endregion
-
-    #region Rendering
-
-    /// <inheritdoc />
-    protected override void OnRender(object drawingContext)
-    {
-        if (drawingContext is not DrawingContext dc)
-            return;
-
-        // Calculate radio button circle position (vertically centered)
-        var circleY = RenderSize.Height / 2;
-        var circleX = RadioButtonSize / 2;
-        var radius = RadioButtonSize / 2 - 1;
-
-        // Use property values - styles and triggers handle state changes
-        var bgBrush = Background;
-        var borderBrush = BorderBrush;
-        var fgBrush = Foreground;
-
-        // Draw background circle
-        if (bgBrush != null)
-        {
-            dc.DrawEllipse(bgBrush, null, new Point(circleX, circleY), radius, radius);
-        }
-
-        // Draw border circle
-        if (borderBrush != null)
-        {
-            var borderPen = new Pen(borderBrush, 1.5);
-            dc.DrawEllipse(null, borderPen, new Point(circleX, circleY), radius, radius);
-        }
-
-        // Draw inner circle when checked
-        if (IsChecked == true)
-        {
-            // Use white for the inner dot (contrasts with blue accent background)
-            var checkedBrush = new SolidColorBrush(Color.FromRgb(255, 255, 255));
-            var innerRadius = radius * 0.45;
-            dc.DrawEllipse(checkedBrush, null, new Point(circleX, circleY), innerRadius, innerRadius);
-        }
-
-        // Draw content text
-        if (Content is string text && !string.IsNullOrEmpty(text) && fgBrush != null)
-        {
-            var fontFamily = FontFamily ?? "Segoe UI";
-            var fontSize = FontSize > 0 ? FontSize : 14;
-            var fontMetrics = TextMeasurement.GetFontMetrics(fontFamily, fontSize);
-
-            var formattedText = new FormattedText(text, fontFamily, fontSize)
-            {
-                Foreground = fgBrush
-            };
-
-            var textX = RadioButtonSize + RadioButtonMargin;
-            var textY = (RenderSize.Height - fontMetrics.LineHeight) / 2;
-            dc.DrawText(formattedText, new Point(textX, textY));
-        }
     }
 
     #endregion
