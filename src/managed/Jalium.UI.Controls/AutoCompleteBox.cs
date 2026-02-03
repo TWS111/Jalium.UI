@@ -8,9 +8,41 @@ namespace Jalium.UI.Controls;
 
 /// <summary>
 /// Represents a text box control that provides auto-completion suggestions.
+/// Inherits from TextBoxBase for full text editing support.
 /// </summary>
-public class AutoCompleteBox : Control
+public class AutoCompleteBox : TextBoxBase, IImeSupport
 {
+    #region Fields
+
+    // Internal text storage
+    private string _text = string.Empty;
+    private bool _linesDirty = true;
+
+    // Text width measurement cache
+    private Dictionary<string, double> _textWidthCache = new();
+    private string? _cachedFontFamily;
+    private double _cachedFontSize;
+    private const int MaxCacheSize = 256;
+
+    // IME support
+    private bool _isImeComposing;
+    private string _imeCompositionString = string.Empty;
+    private int _imeCompositionCursor;
+    private int _imeCompositionStart;
+
+    // Suggestion state
+    private int _selectedSuggestionIndex = -1;
+    private bool _isUpdatingText;
+    private DateTime _lastFilterTime;
+    private System.Timers.Timer? _filterDelayTimer;
+
+    // Constants
+    private const double DefaultHeight = 32;
+    private const double ItemHeight = 28;
+    private const double DropdownMaxItems = 8;
+
+    #endregion
+
     #region Dependency Properties
 
     /// <summary>
@@ -18,14 +50,14 @@ public class AutoCompleteBox : Control
     /// </summary>
     public static readonly DependencyProperty TextProperty =
         DependencyProperty.Register(nameof(Text), typeof(string), typeof(AutoCompleteBox),
-            new PropertyMetadata(string.Empty, OnTextChanged));
+            new PropertyMetadata(string.Empty, OnTextPropertyChanged));
 
     /// <summary>
     /// Identifies the ItemsSource dependency property.
     /// </summary>
     public static readonly DependencyProperty ItemsSourceProperty =
         DependencyProperty.Register(nameof(ItemsSource), typeof(IEnumerable), typeof(AutoCompleteBox),
-            new PropertyMetadata(null));
+            new PropertyMetadata(null, OnItemsSourceChanged));
 
     /// <summary>
     /// Identifies the SelectedItem dependency property.
@@ -60,14 +92,14 @@ public class AutoCompleteBox : Control
     /// </summary>
     public static readonly DependencyProperty MaxDropDownHeightProperty =
         DependencyProperty.Register(nameof(MaxDropDownHeight), typeof(double), typeof(AutoCompleteBox),
-            new PropertyMetadata(200.0));
+            new PropertyMetadata(224.0));
 
     /// <summary>
     /// Identifies the MinimumPopulateDelay dependency property.
     /// </summary>
     public static readonly DependencyProperty MinimumPopulateDelayProperty =
         DependencyProperty.Register(nameof(MinimumPopulateDelay), typeof(TimeSpan), typeof(AutoCompleteBox),
-            new PropertyMetadata(TimeSpan.Zero));
+            new PropertyMetadata(TimeSpan.Zero, OnPopulateDelayChanged));
 
     /// <summary>
     /// Identifies the Watermark dependency property.
@@ -123,6 +155,13 @@ public class AutoCompleteBox : Control
             typeof(RoutedEventHandler), typeof(AutoCompleteBox));
 
     /// <summary>
+    /// Identifies the Populating routed event.
+    /// </summary>
+    public static readonly RoutedEvent PopulatingEvent =
+        EventManager.RegisterRoutedEvent(nameof(Populating), RoutingStrategy.Bubble,
+            typeof(RoutedEventHandler), typeof(AutoCompleteBox));
+
+    /// <summary>
     /// Occurs when the text changes.
     /// </summary>
     public event RoutedEventHandler TextChanged
@@ -158,6 +197,15 @@ public class AutoCompleteBox : Control
         remove => RemoveHandler(DropDownClosedEvent, value);
     }
 
+    /// <summary>
+    /// Occurs when the suggestion list is about to be populated.
+    /// </summary>
+    public event RoutedEventHandler Populating
+    {
+        add => AddHandler(PopulatingEvent, value);
+        remove => RemoveHandler(PopulatingEvent, value);
+    }
+
     #endregion
 
     #region CLR Properties
@@ -165,10 +213,29 @@ public class AutoCompleteBox : Control
     /// <summary>
     /// Gets or sets the text in the text box.
     /// </summary>
-    public string Text
+    public new string Text
     {
-        get => (string)(GetValue(TextProperty) ?? string.Empty);
-        set => SetValue(TextProperty, value);
+        get => _text;
+        set
+        {
+            if (_text != value)
+            {
+                _text = value ?? string.Empty;
+                SetValue(TextProperty, _text);
+                _linesDirty = true;
+
+                if (_caretIndex > _text.Length)
+                    _caretIndex = _text.Length;
+
+                if (!_isUpdatingText)
+                {
+                    TriggerFilterUpdate();
+                    RaiseEvent(new RoutedEventArgs(TextChangedEvent, this));
+                }
+
+                InvalidateVisual();
+            }
+        }
     }
 
     /// <summary>
@@ -221,7 +288,7 @@ public class AutoCompleteBox : Control
     /// </summary>
     public double MaxDropDownHeight
     {
-        get => (double)(GetValue(MaxDropDownHeightProperty) ?? 200.0);
+        get => (double)(GetValue(MaxDropDownHeightProperty) ?? 224.0);
         set => SetValue(MaxDropDownHeightProperty, value);
     }
 
@@ -273,16 +340,6 @@ public class AutoCompleteBox : Control
 
     #endregion
 
-    #region Private Fields
-
-    private const double DefaultHeight = 28;
-    private const double ItemHeight = 24;
-    private int _selectedSuggestionIndex = -1;
-    private int _caretPosition;
-    private bool _isUpdatingText;
-
-    #endregion
-
     #region Constructor
 
     /// <summary>
@@ -290,178 +347,311 @@ public class AutoCompleteBox : Control
     /// </summary>
     public AutoCompleteBox()
     {
-        Focusable = true;
-        Height = DefaultHeight;
+        // Dark theme appearance
         Background = new SolidColorBrush(Color.FromRgb(45, 45, 45));
         Foreground = new SolidColorBrush(Color.White);
         BorderBrush = new SolidColorBrush(Color.FromRgb(100, 100, 100));
         BorderThickness = new Thickness(1);
-        Padding = new Thickness(8, 4, 8, 4);
+        Padding = new Thickness(8, 6, 8, 6);
         CornerRadius = new CornerRadius(4);
+        FontSize = 14;
+        Height = DefaultHeight;
 
-        AddHandler(MouseDownEvent, new RoutedEventHandler(OnMouseDownHandler));
-        AddHandler(KeyDownEvent, new RoutedEventHandler(OnKeyDownHandler));
-        AddHandler(TextInputEvent, new RoutedEventHandler(OnTextInputHandler));
+        // Set IBeam cursor for text input
+        Cursor = Jalium.UI.Cursors.IBeam;
+
+        // Subscribe to IME events
+        InputMethod.CompositionStarted += OnImeCompositionStarted;
+        InputMethod.CompositionUpdated += OnImeCompositionUpdated;
+        InputMethod.CompositionEnded += OnImeCompositionEnded;
+
+        // Subscribe to focus events
+        AddHandler(GotKeyboardFocusEvent, new RoutedEventHandler(OnGotFocusHandler));
+        AddHandler(LostKeyboardFocusEvent, new RoutedEventHandler(OnLostFocusHandler));
+    }
+
+    private void OnGotFocusHandler(object sender, RoutedEventArgs e)
+    {
+        InputMethod.SetTarget(this);
+        InvalidateVisual();
+    }
+
+    private void OnLostFocusHandler(object sender, RoutedEventArgs e)
+    {
+        if (InputMethod.Current == this)
+        {
+            InputMethod.SetTarget(null);
+        }
+        IsDropDownOpen = false;
+        InvalidateVisual();
+    }
+
+    private void OnImeCompositionStarted(object? sender, EventArgs e)
+    {
+        if (InputMethod.Current == this)
+        {
+            OnImeCompositionStart();
+        }
+    }
+
+    private void OnImeCompositionUpdated(object? sender, CompositionEventArgs e)
+    {
+        if (InputMethod.Current == this)
+        {
+            OnImeCompositionUpdate(e.Text, e.CursorPosition);
+        }
+    }
+
+    private void OnImeCompositionEnded(object? sender, CompositionResultEventArgs e)
+    {
+        if (InputMethod.Current == this)
+        {
+            OnImeCompositionEnd(e.Result);
+        }
     }
 
     #endregion
 
-    #region Input Handling
+    #region Abstract Method Implementations
 
-    private void OnMouseDownHandler(object sender, RoutedEventArgs e)
+    /// <inheritdoc />
+    protected override string GetText() => _text;
+
+    /// <inheritdoc />
+    protected override void SetText(string value)
     {
-        if (!IsEnabled) return;
+        Text = value;
+    }
 
-        if (e is MouseButtonEventArgs mouseArgs && mouseArgs.ChangedButton == MouseButton.Left)
+    /// <inheritdoc />
+    protected override double GetLineHeight()
+    {
+        var fontFamily = FontFamily ?? "Segoe UI";
+        var fontSize = FontSize > 0 ? FontSize : 14;
+        var fontMetrics = TextMeasurement.GetFontMetrics(fontFamily, fontSize);
+        return fontMetrics.LineHeight;
+    }
+
+    /// <inheritdoc />
+    protected override double MeasureTextWidth(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return 0;
+
+        var fontFamily = FontFamily ?? "Segoe UI";
+        var fontSize = FontSize > 0 ? FontSize : 14;
+
+        if (_cachedFontFamily != fontFamily || _cachedFontSize != fontSize)
         {
-            Focus();
-            var position = mouseArgs.GetPosition(this);
+            _textWidthCache.Clear();
+            _cachedFontFamily = fontFamily;
+            _cachedFontSize = fontSize;
+        }
 
-            // Check if clicked on a suggestion
-            if (IsDropDownOpen)
-            {
-                var dropDownTop = RenderSize.Height;
-                if (position.Y > dropDownTop)
+        if (_textWidthCache.TryGetValue(text, out var cachedWidth))
+            return cachedWidth;
+
+        var formattedText = new FormattedText(text, fontFamily, fontSize);
+        var usedNative = TextMeasurement.MeasureText(formattedText);
+
+        double width;
+        if (usedNative && formattedText.IsMeasured)
+        {
+            width = formattedText.Width;
+        }
+        else
+        {
+            width = text.Length * fontSize * 0.6;
+        }
+
+        if (_textWidthCache.Count >= MaxCacheSize)
+        {
+            var keysToRemove = _textWidthCache.Keys.Take(MaxCacheSize / 2).ToList();
+            foreach (var key in keysToRemove)
+                _textWidthCache.Remove(key);
+        }
+        _textWidthCache[text] = width;
+
+        return width;
+    }
+
+    /// <inheritdoc />
+    protected override int GetLineCount() => 1;
+
+    /// <inheritdoc />
+    protected override (int lineIndex, int columnIndex) GetLineColumnFromCharIndex(int charIndex)
+    {
+        return (0, Math.Max(0, Math.Min(charIndex, _text.Length)));
+    }
+
+    /// <inheritdoc />
+    protected override int GetCharIndexFromLineColumn(int lineIndex, int columnIndex)
+    {
+        return Math.Max(0, Math.Min(columnIndex, _text.Length));
+    }
+
+    /// <inheritdoc />
+    protected override string GetLineTextInternal(int lineIndex)
+    {
+        return _text;
+    }
+
+    /// <inheritdoc />
+    protected override int GetLineStartIndex(int lineIndex)
+    {
+        return 0;
+    }
+
+    /// <inheritdoc />
+    protected override int GetLineLengthInternal(int lineIndex)
+    {
+        return _text.Length;
+    }
+
+    #endregion
+
+    #region Key Handling Override
+
+    /// <inheritdoc />
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Down:
+                if (IsDropDownOpen && FilteredItems.Count > 0)
                 {
-                    var suggestionIndex = (int)((position.Y - dropDownTop) / ItemHeight);
-                    if (suggestionIndex >= 0 && suggestionIndex < FilteredItems.Count)
-                    {
-                        SelectSuggestion(suggestionIndex);
-                        e.Handled = true;
-                        return;
-                    }
+                    _selectedSuggestionIndex = Math.Min(_selectedSuggestionIndex + 1, FilteredItems.Count - 1);
+                    InvalidateVisual();
                 }
-            }
+                else if (FilteredItems.Count > 0)
+                {
+                    IsDropDownOpen = true;
+                    _selectedSuggestionIndex = 0;
+                }
+                e.Handled = true;
+                return;
 
-            // Position caret based on click
-            _caretPosition = Text.Length;
-            InvalidateVisual();
-            e.Handled = true;
-        }
-    }
+            case Key.Up:
+                if (IsDropDownOpen && _selectedSuggestionIndex > 0)
+                {
+                    _selectedSuggestionIndex--;
+                    InvalidateVisual();
+                }
+                e.Handled = true;
+                return;
 
-    private void OnKeyDownHandler(object sender, RoutedEventArgs e)
-    {
-        if (!IsEnabled) return;
+            case Key.Enter:
+                if (IsDropDownOpen && _selectedSuggestionIndex >= 0 && _selectedSuggestionIndex < FilteredItems.Count)
+                {
+                    SelectSuggestion(_selectedSuggestionIndex);
+                }
+                IsDropDownOpen = false;
+                e.Handled = true;
+                return;
 
-        if (e is KeyEventArgs keyArgs)
-        {
-            switch (keyArgs.Key)
-            {
-                case Key.Down:
-                    if (IsDropDownOpen)
-                    {
-                        _selectedSuggestionIndex = Math.Min(_selectedSuggestionIndex + 1, FilteredItems.Count - 1);
-                        InvalidateVisual();
-                    }
-                    else if (FilteredItems.Count > 0)
-                    {
-                        IsDropDownOpen = true;
-                    }
-                    e.Handled = true;
-                    break;
-
-                case Key.Up:
-                    if (IsDropDownOpen)
-                    {
-                        _selectedSuggestionIndex = Math.Max(_selectedSuggestionIndex - 1, 0);
-                        InvalidateVisual();
-                    }
-                    e.Handled = true;
-                    break;
-
-                case Key.Enter:
-                    if (IsDropDownOpen && _selectedSuggestionIndex >= 0)
-                    {
-                        SelectSuggestion(_selectedSuggestionIndex);
-                    }
+            case Key.Escape:
+                if (IsDropDownOpen)
+                {
                     IsDropDownOpen = false;
                     e.Handled = true;
-                    break;
+                    return;
+                }
+                break;
 
-                case Key.Escape:
+            case Key.Tab:
+                if (IsDropDownOpen && _selectedSuggestionIndex >= 0 && _selectedSuggestionIndex < FilteredItems.Count)
+                {
+                    SelectSuggestion(_selectedSuggestionIndex);
                     IsDropDownOpen = false;
                     e.Handled = true;
-                    break;
-
-                case Key.Tab:
-                    if (IsDropDownOpen && _selectedSuggestionIndex >= 0)
-                    {
-                        SelectSuggestion(_selectedSuggestionIndex);
-                        IsDropDownOpen = false;
-                        e.Handled = true;
-                    }
-                    break;
-
-                case Key.Back:
-                    if (Text.Length > 0 && _caretPosition > 0)
-                    {
-                        Text = Text.Remove(_caretPosition - 1, 1);
-                        _caretPosition--;
-                    }
-                    e.Handled = true;
-                    break;
-
-                case Key.Delete:
-                    if (_caretPosition < Text.Length)
-                    {
-                        Text = Text.Remove(_caretPosition, 1);
-                    }
-                    e.Handled = true;
-                    break;
-
-                case Key.Left:
-                    _caretPosition = Math.Max(0, _caretPosition - 1);
-                    InvalidateVisual();
-                    e.Handled = true;
-                    break;
-
-                case Key.Right:
-                    _caretPosition = Math.Min(Text.Length, _caretPosition + 1);
-                    InvalidateVisual();
-                    e.Handled = true;
-                    break;
-
-                case Key.Home:
-                    _caretPosition = 0;
-                    InvalidateVisual();
-                    e.Handled = true;
-                    break;
-
-                case Key.End:
-                    _caretPosition = Text.Length;
-                    InvalidateVisual();
-                    e.Handled = true;
-                    break;
-            }
+                    return;
+                }
+                break;
         }
+
+        base.OnKeyDown(e);
     }
 
-    private void OnTextInputHandler(object sender, RoutedEventArgs e)
-    {
-        if (!IsEnabled) return;
+    #endregion
 
-        if (e is TextCompositionEventArgs textArgs && !string.IsNullOrEmpty(textArgs.Text))
+    #region Text Input Override
+
+    /// <inheritdoc />
+    protected override void InsertText(string textToInsert)
+    {
+        if (IsReadOnly || string.IsNullOrEmpty(textToInsert))
+            return;
+
+        PushUndo();
+
+        // Delete selection if any
+        if (_selectionLength > 0)
         {
-            var newText = Text.Insert(_caretPosition, textArgs.Text);
-            Text = newText;
-            _caretPosition += textArgs.Text.Length;
-            e.Handled = true;
+            DeleteSelectionInternal();
         }
+
+        // Ensure caret is within bounds
+        if (_caretIndex < 0) _caretIndex = 0;
+        if (_caretIndex > _text.Length) _caretIndex = _text.Length;
+
+        // Insert text
+        _text = _text.Substring(0, _caretIndex) + textToInsert + _text.Substring(_caretIndex);
+        _caretIndex += textToInsert.Length;
+        _linesDirty = true;
+
+        // Trigger filter update
+        TriggerFilterUpdate();
+        RaiseEvent(new RoutedEventArgs(TextChangedEvent, this));
+
+        ResetCaretBlink();
+        EnsureCaretVisible();
+        InvalidateVisual();
     }
 
     #endregion
 
     #region Suggestion Handling
 
+    private void TriggerFilterUpdate()
+    {
+        var delay = MinimumPopulateDelay;
+        if (delay > TimeSpan.Zero)
+        {
+            _lastFilterTime = DateTime.Now;
+
+            if (_filterDelayTimer == null)
+            {
+                _filterDelayTimer = new System.Timers.Timer(delay.TotalMilliseconds);
+                _filterDelayTimer.AutoReset = false;
+                _filterDelayTimer.Elapsed += (s, e) =>
+                {
+                    // Check if enough time has passed since last update
+                    if ((DateTime.Now - _lastFilterTime).TotalMilliseconds >= delay.TotalMilliseconds - 10)
+                    {
+                        UpdateFilteredItems();
+                    }
+                };
+            }
+
+            _filterDelayTimer.Stop();
+            _filterDelayTimer.Start();
+        }
+        else
+        {
+            UpdateFilteredItems();
+        }
+    }
+
     private void UpdateFilteredItems()
     {
         if (_isUpdatingText) return;
 
+        RaiseEvent(new RoutedEventArgs(PopulatingEvent, this));
+
         FilteredItems.Clear();
         _selectedSuggestionIndex = -1;
 
-        if (ItemsSource == null || string.IsNullOrEmpty(Text) || Text.Length < MinimumPrefixLength)
+        if (ItemsSource == null || string.IsNullOrEmpty(_text) || _text.Length < MinimumPrefixLength)
         {
             IsDropDownOpen = false;
             return;
@@ -479,11 +669,30 @@ public class AutoCompleteBox : Control
         {
             _selectedSuggestionIndex = 0;
             IsDropDownOpen = true;
+
+            // Auto-complete first match if enabled
+            if (IsTextCompletionEnabled && FilteredItems.Count > 0)
+            {
+                var firstItemText = GetItemText(FilteredItems[0]);
+                if (firstItemText.StartsWith(_text, StringComparison.OrdinalIgnoreCase) && firstItemText.Length > _text.Length)
+                {
+                    var completion = firstItemText.Substring(_text.Length);
+                    _isUpdatingText = true;
+                    var currentCaret = _caretIndex;
+                    _text = _text + completion;
+                    _selectionStart = currentCaret;
+                    _selectionLength = completion.Length;
+                    _caretIndex = _text.Length;
+                    _isUpdatingText = false;
+                }
+            }
         }
         else
         {
             IsDropDownOpen = false;
         }
+
+        InvalidateVisual();
     }
 
     private bool MatchesFilter(object item)
@@ -491,7 +700,7 @@ public class AutoCompleteBox : Control
         var itemText = GetItemText(item);
         if (string.IsNullOrEmpty(itemText)) return false;
 
-        var searchText = Text;
+        var searchText = _text;
 
         // Use custom filter if provided
         if (ItemFilter != null)
@@ -514,7 +723,7 @@ public class AutoCompleteBox : Control
                 itemText.Equals(searchText, StringComparison.OrdinalIgnoreCase),
             AutoCompleteFilterMode.EqualsCaseSensitive =>
                 itemText.Equals(searchText, StringComparison.Ordinal),
-            AutoCompleteFilterMode.Custom => true, // Handled by ItemFilter
+            AutoCompleteFilterMode.Custom => true,
             AutoCompleteFilterMode.None => true,
             _ => true
         };
@@ -541,8 +750,10 @@ public class AutoCompleteBox : Control
         var oldItem = SelectedItem;
 
         _isUpdatingText = true;
-        Text = GetItemText(item);
-        _caretPosition = Text.Length;
+        _text = GetItemText(item);
+        _caretIndex = _text.Length;
+        _selectionStart = 0;
+        _selectionLength = 0;
         _isUpdatingText = false;
 
         SelectedItem = item;
@@ -554,6 +765,28 @@ public class AutoCompleteBox : Control
         RaiseEvent(args);
 
         InvalidateVisual();
+    }
+
+    #endregion
+
+    #region Mouse Handling
+
+    /// <inheritdoc />
+    protected override int GetCaretIndexFromPosition(Point position)
+    {
+        // Check if click is on dropdown
+        if (IsDropDownOpen && position.Y > DefaultHeight)
+        {
+            var dropdownY = position.Y - DefaultHeight;
+            var suggestionIndex = (int)(dropdownY / ItemHeight);
+            if (suggestionIndex >= 0 && suggestionIndex < FilteredItems.Count)
+            {
+                SelectSuggestion(suggestionIndex);
+                return _caretIndex;
+            }
+        }
+
+        return base.GetCaretIndexFromPosition(position);
     }
 
     #endregion
@@ -589,6 +822,8 @@ public class AutoCompleteBox : Control
         var inputRect = new Rect(0, 0, RenderSize.Width, DefaultHeight);
         var cornerRadius = CornerRadius;
         var hasCornerRadius = cornerRadius.TopLeft > 0;
+        var lineHeight = Math.Round(GetLineHeight());
+        var padding = Padding;
 
         // Draw background
         if (Background != null)
@@ -618,41 +853,57 @@ public class AutoCompleteBox : Control
             }
         }
 
-        // Draw text or watermark
-        var padding = Padding;
-        var textX = padding.Left;
-        var textY = padding.Top;
+        // Content area
+        var contentRect = new Rect(
+            padding.Left,
+            padding.Top,
+            Math.Max(0, inputRect.Width - padding.Left - padding.Right),
+            Math.Max(0, inputRect.Height - padding.Top - padding.Bottom));
 
-        if (string.IsNullOrEmpty(Text) && !string.IsNullOrEmpty(Watermark))
+        // Clip to content area
+        dc.PushClip(new RectangleGeometry(contentRect));
+
+        // Draw selection background
+        if (_selectionLength > 0 && IsKeyboardFocused)
+        {
+            DrawSelection(dc, contentRect, lineHeight);
+        }
+
+        // Draw text or watermark
+        if (string.IsNullOrEmpty(_text) && !string.IsNullOrEmpty(Watermark))
         {
             var watermarkText = new FormattedText(Watermark, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14)
             {
                 Foreground = new SolidColorBrush(Color.FromRgb(128, 128, 128))
             };
             TextMeasurement.MeasureText(watermarkText);
-            dc.DrawText(watermarkText, new Point(textX, (DefaultHeight - watermarkText.Height) / 2));
+            var textY = (DefaultHeight - watermarkText.Height) / 2;
+            dc.DrawText(watermarkText, new Point(contentRect.X - Math.Round(_horizontalOffset), textY));
         }
-        else
+        else if (!string.IsNullOrEmpty(_text))
         {
-            var formattedText = new FormattedText(Text, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14)
+            var formattedText = new FormattedText(_text, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14)
             {
                 Foreground = Foreground ?? new SolidColorBrush(Color.White)
             };
             TextMeasurement.MeasureText(formattedText);
-            var textYPos = (DefaultHeight - formattedText.Height) / 2;
-            dc.DrawText(formattedText, new Point(textX, textYPos));
-
-            // Draw caret
-            if (IsFocused)
-            {
-                var caretText = Text.Substring(0, _caretPosition);
-                var caretFormattedText = new FormattedText(caretText, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14);
-                TextMeasurement.MeasureText(caretFormattedText);
-                var caretX = textX + caretFormattedText.Width;
-                var caretPen = new Pen(Foreground ?? new SolidColorBrush(Color.White), 1);
-                dc.DrawLine(caretPen, new Point(caretX, textYPos), new Point(caretX, textYPos + formattedText.Height));
-            }
+            var textY = (DefaultHeight - formattedText.Height) / 2;
+            dc.DrawText(formattedText, new Point(contentRect.X - Math.Round(_horizontalOffset), textY));
         }
+
+        // Draw IME composition
+        if (_isImeComposing && !string.IsNullOrEmpty(_imeCompositionString))
+        {
+            DrawImeComposition(dc, contentRect, lineHeight);
+        }
+
+        // Draw caret
+        if (IsFocused && !IsReadOnly)
+        {
+            DrawCaret(dc, contentRect, lineHeight);
+        }
+
+        dc.Pop(); // Pop clip
 
         // Draw drop-down
         if (IsDropDownOpen && FilteredItems.Count > 0)
@@ -661,15 +912,96 @@ public class AutoCompleteBox : Control
         }
     }
 
+    private void DrawSelection(DrawingContext dc, Rect contentRect, double lineHeight)
+    {
+        if (SelectionBrush == null)
+            return;
+
+        var roundedHorizontalOffset = Math.Round(_horizontalOffset);
+        var textBefore = _text.Substring(0, Math.Min(_selectionStart, _text.Length));
+        var selectedText = _text.Substring(_selectionStart, Math.Min(_selectionLength, _text.Length - _selectionStart));
+
+        var startX = Math.Round(contentRect.X + MeasureTextWidth(textBefore) - roundedHorizontalOffset);
+        var width = Math.Max(Math.Round(MeasureTextWidth(selectedText)), 1);
+        var textY = (DefaultHeight - lineHeight) / 2;
+
+        var selRect = new Rect(startX, textY, width, lineHeight);
+        dc.DrawRectangle(SelectionBrush, null, selRect);
+    }
+
+    private void DrawImeComposition(DrawingContext dc, Rect contentRect, double lineHeight)
+    {
+        if (string.IsNullOrEmpty(_imeCompositionString))
+            return;
+
+        var roundedHorizontalOffset = Math.Round(_horizontalOffset);
+        var textBeforeCaret = _text.Substring(0, Math.Min(_caretIndex, _text.Length));
+        var x = Math.Round(contentRect.X + MeasureTextWidth(textBeforeCaret) - roundedHorizontalOffset);
+        var textY = (DefaultHeight - lineHeight) / 2;
+
+        var compositionWidth = MeasureTextWidth(_imeCompositionString);
+        var compositionBgBrush = new SolidColorBrush(Color.FromRgb(60, 60, 80));
+        dc.DrawRectangle(compositionBgBrush, null, new Rect(x, textY, compositionWidth, lineHeight));
+
+        var compositionText = new FormattedText(_imeCompositionString, FontFamily ?? "Segoe UI", FontSize)
+        {
+            Foreground = new SolidColorBrush(Color.FromRgb(255, 255, 200)),
+            MaxTextWidth = contentRect.Width,
+            MaxTextHeight = lineHeight
+        };
+        dc.DrawText(compositionText, new Point(x, textY));
+
+        var underlinePen = new Pen(new SolidColorBrush(Color.FromRgb(200, 200, 100)), 1);
+        dc.DrawLine(underlinePen, new Point(x, textY + lineHeight - 2), new Point(x + compositionWidth, textY + lineHeight - 2));
+    }
+
+    private void DrawCaret(DrawingContext dc, Rect contentRect, double lineHeight)
+    {
+        var caretOpacity = UpdateCaretAnimation();
+
+        if (CaretBrush == null || _isImeComposing || caretOpacity < 0.01)
+            return;
+
+        var columnIndex = Math.Min(_caretIndex, _text.Length);
+        var textBeforeCaret = _text.Substring(0, columnIndex);
+
+        var roundedHorizontalOffset = Math.Round(_horizontalOffset);
+        var x = Math.Round(contentRect.X + MeasureTextWidth(textBeforeCaret) - roundedHorizontalOffset);
+        var textY = (DefaultHeight - lineHeight) / 2;
+
+        Brush caretBrushWithOpacity;
+        if (CaretBrush is SolidColorBrush solidBrush)
+        {
+            var color = solidBrush.Color;
+            var alpha = (byte)(color.A * caretOpacity);
+            caretBrushWithOpacity = new SolidColorBrush(Color.FromArgb(alpha, color.R, color.G, color.B));
+        }
+        else
+        {
+            caretBrushWithOpacity = CaretBrush;
+        }
+
+        var caretPen = new Pen(caretBrushWithOpacity, 1.5);
+        dc.DrawLine(caretPen, new Point(x, textY), new Point(x, textY + lineHeight));
+    }
+
     private void DrawDropDown(DrawingContext dc)
     {
         var dropDownTop = DefaultHeight;
         var dropDownHeight = Math.Min(FilteredItems.Count * ItemHeight, MaxDropDownHeight);
         var dropDownRect = new Rect(0, dropDownTop, RenderSize.Width, dropDownHeight);
 
-        // Draw drop-down background
+        // Draw drop-down background with shadow effect (simplified)
+        var shadowBrush = new SolidColorBrush(Color.FromArgb(40, 0, 0, 0));
+        var shadowRect = new Rect(2, dropDownTop + 2, RenderSize.Width, dropDownHeight);
+        dc.DrawRectangle(shadowBrush, null, shadowRect);
+
         var dropDownBg = new SolidColorBrush(Color.FromRgb(50, 50, 50));
-        dc.DrawRectangle(dropDownBg, new Pen(BorderBrush ?? new SolidColorBrush(Color.FromRgb(100, 100, 100)), 1), dropDownRect);
+        var dropDownBorder = new Pen(BorderBrush ?? new SolidColorBrush(Color.FromRgb(100, 100, 100)), 1);
+        dc.DrawRectangle(dropDownBg, dropDownBorder, dropDownRect);
+
+        // Clip to dropdown
+        dc.PushClip(new RectangleGeometry(dropDownRect));
 
         // Draw items
         var y = dropDownTop;
@@ -680,7 +1012,7 @@ public class AutoCompleteBox : Control
         {
             var itemRect = new Rect(1, y, RenderSize.Width - 2, ItemHeight);
 
-            // Draw selection/hover background
+            // Draw selection background
             if (i == _selectedSuggestionIndex)
             {
                 dc.DrawRectangle(selectionBrush, null, itemRect);
@@ -688,28 +1020,47 @@ public class AutoCompleteBox : Control
 
             // Draw item text
             var itemText = GetItemText(FilteredItems[i]);
-            var formattedText = new FormattedText(itemText, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 12)
+            var formattedText = new FormattedText(itemText, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 13)
             {
                 Foreground = Foreground ?? new SolidColorBrush(Color.White)
             };
             TextMeasurement.MeasureText(formattedText);
-            dc.DrawText(formattedText, new Point(Padding.Left, y + (ItemHeight - formattedText.Height) / 2));
+            var itemTextY = y + (ItemHeight - formattedText.Height) / 2;
+            dc.DrawText(formattedText, new Point(Padding.Left, itemTextY));
 
             y += ItemHeight;
         }
+
+        dc.Pop(); // Pop dropdown clip
     }
 
     #endregion
 
     #region Property Changed Callbacks
 
-    private static void OnTextChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    private static void OnTextPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is AutoCompleteBox autoComplete)
+        {
+            var newText = (string)(e.NewValue ?? string.Empty);
+            if (autoComplete._text != newText)
+            {
+                autoComplete._text = newText;
+                autoComplete._linesDirty = true;
+
+                if (autoComplete._caretIndex > autoComplete._text.Length)
+                    autoComplete._caretIndex = autoComplete._text.Length;
+
+                autoComplete.InvalidateVisual();
+            }
+        }
+    }
+
+    private static void OnItemsSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is AutoCompleteBox autoComplete)
         {
             autoComplete.UpdateFilteredItems();
-            autoComplete.RaiseEvent(new RoutedEventArgs(TextChangedEvent, autoComplete));
-            autoComplete.InvalidateVisual();
         }
     }
 
@@ -738,12 +1089,96 @@ public class AutoCompleteBox : Control
         }
     }
 
+    private static void OnPopulateDelayChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is AutoCompleteBox autoComplete && autoComplete._filterDelayTimer != null)
+        {
+            var delay = (TimeSpan)e.NewValue;
+            autoComplete._filterDelayTimer.Interval = delay.TotalMilliseconds > 0 ? delay.TotalMilliseconds : 1;
+        }
+    }
+
     private static void OnVisualPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is AutoCompleteBox autoComplete)
         {
             autoComplete.InvalidateVisual();
         }
+    }
+
+    #endregion
+
+    #region IME Support
+
+    /// <summary>
+    /// Gets whether IME composition is currently active.
+    /// </summary>
+    public bool IsImeComposing => _isImeComposing;
+
+    /// <inheritdoc />
+    public Point GetImeCaretPosition()
+    {
+        var caretPos = GetCaretScreenPosition();
+
+        var element = this as UIElement;
+        var parent = element?.VisualParent;
+        while (parent != null)
+        {
+            if (parent is FrameworkElement fe)
+            {
+                caretPos = new Point(caretPos.X + fe.Margin.Left, caretPos.Y + fe.Margin.Top);
+            }
+            if (parent is Window)
+                break;
+            parent = parent.VisualParent;
+        }
+
+        return caretPos;
+    }
+
+    private Point GetCaretScreenPosition()
+    {
+        var lineHeight = Math.Round(GetLineHeight());
+        var columnIndex = Math.Min(_caretIndex, _text.Length);
+        var textBeforeCaret = _text.Substring(0, columnIndex);
+
+        double x = Padding.Left - _horizontalOffset + MeasureTextWidth(textBeforeCaret);
+        double y = Padding.Top;
+
+        return new Point(x, y + lineHeight);
+    }
+
+    /// <inheritdoc />
+    public void OnImeCompositionStart()
+    {
+        _isImeComposing = true;
+        _imeCompositionStart = _caretIndex;
+        _imeCompositionString = string.Empty;
+        _imeCompositionCursor = 0;
+
+        if (_selectionLength > 0)
+        {
+            DeleteSelection();
+        }
+
+        InvalidateVisual();
+    }
+
+    /// <inheritdoc />
+    public void OnImeCompositionUpdate(string compositionString, int cursorPosition)
+    {
+        _imeCompositionString = compositionString;
+        _imeCompositionCursor = cursorPosition;
+        InvalidateVisual();
+    }
+
+    /// <inheritdoc />
+    public void OnImeCompositionEnd(string? resultString)
+    {
+        _isImeComposing = false;
+        _imeCompositionString = string.Empty;
+        _imeCompositionCursor = 0;
+        InvalidateVisual();
     }
 
     #endregion
