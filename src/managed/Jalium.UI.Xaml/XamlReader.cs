@@ -1576,6 +1576,7 @@ public static class XamlTypeRegistry
         Register<AutoCompleteBox>(types);
         Register<HyperlinkButton>(types);
         Register<Label>(types);
+        Register<InkCanvas>(types);
 
         // Jalium.UI.Controls.Primitives namespace
         Register<BulletDecorator>(types);

@@ -61,18 +61,38 @@ public class Path : Shape
             return naturalSize;
         }
 
-        // For other stretch modes, prefer explicit Width/Height if set
-        var width = double.IsNaN(Width) ? availableSize.Width : Width;
-        var height = double.IsNaN(Height) ? availableSize.Height : Height;
+        // Check which dimensions are explicitly set
+        var hasExplicitWidth = !double.IsNaN(Width);
+        var hasExplicitHeight = !double.IsNaN(Height);
 
-        // If available size is infinite, fall back to natural geometry size
-        if (double.IsPositiveInfinity(width))
+        // Calculate aspect ratio from natural geometry size
+        var aspectRatio = naturalSize.Height > 0 ? naturalSize.Width / naturalSize.Height : 1.0;
+
+        double width, height;
+
+        if (hasExplicitWidth && hasExplicitHeight)
         {
-            width = naturalSize.Width;
+            // Both dimensions set - use them directly
+            width = Width;
+            height = Height;
         }
-        if (double.IsPositiveInfinity(height))
+        else if (hasExplicitWidth && !hasExplicitHeight)
         {
-            height = naturalSize.Height;
+            // Only Width set - calculate Height based on aspect ratio
+            width = Width;
+            height = aspectRatio > 0 ? width / aspectRatio : width;
+        }
+        else if (!hasExplicitWidth && hasExplicitHeight)
+        {
+            // Only Height set - calculate Width based on aspect ratio
+            height = Height;
+            width = height * aspectRatio;
+        }
+        else
+        {
+            // Neither dimension set - use available size or natural size
+            width = double.IsPositiveInfinity(availableSize.Width) ? naturalSize.Width : availableSize.Width;
+            height = double.IsPositiveInfinity(availableSize.Height) ? naturalSize.Height : availableSize.Height;
         }
 
         return new Size(width, height);

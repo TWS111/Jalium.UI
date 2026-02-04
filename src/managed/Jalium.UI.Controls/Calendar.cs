@@ -408,33 +408,18 @@ public class Calendar : Control
         var rect = new Rect(RenderSize);
         var padding = Padding;
         var cornerRadius = CornerRadius;
-        var hasCornerRadius = cornerRadius.TopLeft > 0;
 
         // Draw background
         if (Background != null)
         {
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(Background, null, rect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(Background, null, rect);
-            }
+            dc.DrawRoundedRectangle(Background, null, rect, cornerRadius);
         }
 
         // Draw border
         if (BorderBrush != null && BorderThickness.TotalWidth > 0)
         {
             var pen = new Pen(BorderBrush, BorderThickness.Left);
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(null, pen, rect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(null, pen, rect);
-            }
+            dc.DrawRoundedRectangle(null, pen, rect, cornerRadius);
         }
 
         var startX = padding.Left + BorderThickness.Left;

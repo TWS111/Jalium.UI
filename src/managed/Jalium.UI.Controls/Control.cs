@@ -113,6 +113,7 @@ public class Control : FrameworkElement
 
     private FrameworkElement? _templateRoot;
     private bool _templateApplied;
+    private IList<Trigger>? _appliedTemplateTriggers;
 
     #endregion
 
@@ -281,6 +282,20 @@ public class Control : FrameworkElement
                 // This allows RelativeSource FindAncestor bindings to resolve
                 ReactivateBindingsRecursive(_templateRoot);
 
+                // Apply template triggers
+                // Triggers are attached to the templated control (this) but target elements in the template by name
+                if (template.Triggers.Count > 0)
+                {
+                    _appliedTemplateTriggers = template.Triggers;
+                    foreach (var trigger in _appliedTemplateTriggers)
+                    {
+                        // Set the parent template triggers so the trigger can find sibling triggers
+                        // when it needs to re-apply values after deactivation
+                        trigger.ParentTemplateTriggers = _appliedTemplateTriggers;
+                        trigger.Attach(this);
+                    }
+                }
+
                 // Call OnApplyTemplate for derived classes to get template parts
                 OnApplyTemplate();
 
@@ -343,6 +358,17 @@ public class Control : FrameworkElement
 
     private void ClearTemplateContent()
     {
+        // Detach template triggers
+        if (_appliedTemplateTriggers != null)
+        {
+            foreach (var trigger in _appliedTemplateTriggers)
+            {
+                trigger.Detach(this);
+                trigger.ParentTemplateTriggers = null;
+            }
+            _appliedTemplateTriggers = null;
+        }
+
         if (_templateRoot != null)
         {
             RemoveVisualChild(_templateRoot);

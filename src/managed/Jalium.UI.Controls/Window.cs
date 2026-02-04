@@ -985,6 +985,101 @@ public partial class Window : ContentControl, IWindowHost
     private static WndProcDelegate? _wndProcDelegate;
     private bool _isSizing; // True during drag resize
 
+    // Cursor cache - stores loaded cursor handles to avoid repeated LoadCursor calls
+    private static readonly Dictionary<CursorType, nint> _cursorCache = [];
+
+    /// <summary>
+    /// Gets the Windows cursor handle for a CursorType.
+    /// </summary>
+    private static nint GetCursorHandle(CursorType cursorType)
+    {
+        if (_cursorCache.TryGetValue(cursorType, out var handle))
+        {
+            return handle;
+        }
+
+        nint cursorId = cursorType switch
+        {
+            CursorType.Arrow => IDC_ARROW,
+            CursorType.IBeam => IDC_IBEAM,
+            CursorType.Wait => IDC_WAIT,
+            CursorType.Cross => IDC_CROSS,
+            CursorType.UpArrow => IDC_UPARROW,
+            CursorType.SizeNWSE => IDC_SIZENWSE,
+            CursorType.SizeNESW => IDC_SIZENESW,
+            CursorType.SizeWE => IDC_SIZEWE,
+            CursorType.SizeNS => IDC_SIZENS,
+            CursorType.SizeAll => IDC_SIZEALL,
+            CursorType.No => IDC_NO,
+            CursorType.Hand => IDC_HAND,
+            CursorType.AppStarting => IDC_APPSTARTING,
+            CursorType.Help => IDC_HELP,
+            CursorType.None => nint.Zero, // Will hide cursor
+            _ => IDC_ARROW
+        };
+
+        handle = cursorId != nint.Zero ? LoadCursor(nint.Zero, cursorId) : nint.Zero;
+        _cursorCache[cursorType] = handle;
+        return handle;
+    }
+
+    /// <summary>
+    /// Handles WM_SETCURSOR by finding the element under the cursor and setting the appropriate cursor.
+    /// </summary>
+    private bool OnSetCursor(nint lParam)
+    {
+        // Only handle if the cursor is in the client area
+        int hitTest = (short)(lParam.ToInt64() & 0xFFFF);
+        if (hitTest != HTCLIENT_SETCURSOR)
+        {
+            return false; // Let Windows handle non-client area cursors
+        }
+
+        // Get the current mouse position
+        if (!GetCursorPos(out POINT screenPt))
+        {
+            return false;
+        }
+
+        _ = ScreenToClient(Handle, ref screenPt);
+        Point clientPos = new(screenPt.X, screenPt.Y);
+
+        // Find the element under the cursor
+        var hitResult = HitTest(clientPos);
+        var element = hitResult?.VisualHit;
+
+        // Walk up the visual tree to find the first element with a non-null Cursor
+        Cursor? cursor = null;
+        while (element != null)
+        {
+            if (element is FrameworkElement fe && fe.Cursor != null)
+            {
+                cursor = fe.Cursor;
+                break;
+            }
+            element = element.VisualParent;
+        }
+
+        // Set the cursor
+        nint cursorHandle;
+        if (cursor != null)
+        {
+            cursorHandle = GetCursorHandle(cursor.CursorType);
+        }
+        else
+        {
+            cursorHandle = GetCursorHandle(CursorType.Arrow);
+        }
+
+        if (cursorHandle != nint.Zero)
+        {
+            _ = SetCursor(cursorHandle);
+            return true;
+        }
+
+        return false;
+    }
+
 #if DEBUG
     private DevToolsWindow? _devToolsWindow;
     internal DevToolsOverlay? DevToolsOverlay { get; set; }
@@ -1193,6 +1288,28 @@ public partial class Window : ContentControl, IWindowHost
                     _ = RedrawWindow(hWnd, nint.Zero, nint.Zero, RDW_INVALIDATE | RDW_UPDATENOW);
                     return nint.Zero;
 
+                case WM_SIZING:
+                    // WM_SIZING is sent continuously during drag resize - lParam points to RECT
+                    if (window._isSizing)
+                    {
+                        // Get the new size from the sizing rect
+                        var sizingRect = Marshal.PtrToStructure<RECT>(lParam);
+                        int newWidth = sizingRect.right - sizingRect.left;
+                        int newHeight = sizingRect.bottom - sizingRect.top;
+
+                        // Only resize if dimensions actually changed (avoid redundant operations)
+                        if (newWidth > 0 && newHeight > 0 &&
+                            (newWidth != (int)window.Width || newHeight != (int)window.Height))
+                        {
+                            window.Width = newWidth;
+                            window.Height = newHeight;
+                            window.RenderTarget?.Resize(newWidth, newHeight);
+                            // Force immediate repaint to prevent DWM from showing stale/stretched content
+                            _ = RedrawWindow(hWnd, nint.Zero, nint.Zero, RDW_INVALIDATE | RDW_UPDATENOW);
+                        }
+                    }
+                    break;
+
                 case WM_ENTERSIZEMOVE:
                     window._isSizing = true;
                     // Disable VSync during resize for faster frame updates
@@ -1253,6 +1370,14 @@ public partial class Window : ContentControl, IWindowHost
                 case WM_IME_CHAR:
                     // IME character - let it fall through to default processing
                     // or handle specially if needed
+                    break;
+
+                // Cursor
+                case WM_SETCURSOR:
+                    if (window.OnSetCursor(lParam))
+                    {
+                        return 1; // Return TRUE to indicate we handled the message
+                    }
                     break;
 
                 // Mouse input
@@ -1328,19 +1453,15 @@ public partial class Window : ContentControl, IWindowHost
         Width = width;
         Height = height;
 
-        // Always resize immediately on size change
-        RenderTarget?.Resize(width, height);
-
+        // During drag resize, WM_SIZING already handles resize and repaint.
+        // Only resize here for non-drag cases (maximize/restore/programmatic resize).
         if (!_isSizing)
         {
-            // Not dragging (maximize/restore) - also invalidate measure for layout
+            RenderTarget?.Resize(width, height);
             InvalidateMeasure();
         }
-        else
-        {
-            // During drag resize: repaint immediately
-            _ = RedrawWindow(Handle, nint.Zero, nint.Zero, RDW_INVALIDATE | RDW_UPDATENOW);
-        }
+        // Note: During drag resize, WM_SIZING handles the RenderTarget.Resize and repaint
+        // to prevent jitter from DWM stretching old frames.
     }
 
     private RenderTargetDrawingContext? _drawingContext;
@@ -2171,12 +2292,27 @@ public partial class Window : ContentControl, IWindowHost
     private const int DWMSBT_MAINWINDOW = 2;     // Mica
     private const int DWMSBT_TRANSIENTWINDOW = 3; // Acrylic
     private const int DWMSBT_TABBEDWINDOW = 4;   // Mica Alt
+    private const uint WM_SIZING = 0x0214;
     private const uint WM_ENTERSIZEMOVE = 0x0231;
     private const uint WM_EXITSIZEMOVE = 0x0232;
     private const uint CS_HREDRAW = 0x0002;
     private const uint CS_VREDRAW = 0x0001;
     private const int COLOR_WINDOW = 5;
     private const nint IDC_ARROW = 32512;
+    private const nint IDC_IBEAM = 32513;
+    private const nint IDC_WAIT = 32514;
+    private const nint IDC_CROSS = 32515;
+    private const nint IDC_UPARROW = 32516;
+    private const nint IDC_SIZE = 32640;      // Same as IDC_SIZEALL
+    private const nint IDC_SIZENWSE = 32642;
+    private const nint IDC_SIZENESW = 32643;
+    private const nint IDC_SIZEWE = 32644;
+    private const nint IDC_SIZENS = 32645;
+    private const nint IDC_SIZEALL = 32646;
+    private const nint IDC_NO = 32648;
+    private const nint IDC_HAND = 32649;
+    private const nint IDC_APPSTARTING = 32650;
+    private const nint IDC_HELP = 32651;
     private const uint RDW_INVALIDATE = 0x0001;
     private const uint RDW_UPDATENOW = 0x0100;
     private const uint WM_USER = 0x0400;
@@ -2220,6 +2356,10 @@ public partial class Window : ContentControl, IWindowHost
     // TrackMouseEvent flags
     private const uint TME_LEAVE = 0x00000002;
     private const uint TME_NONCLIENT = 0x00000010;
+
+    // Cursor message
+    private const uint WM_SETCURSOR = 0x0020;
+    private const int HTCLIENT_SETCURSOR = 1;
 
     // IME messages
     private const uint WM_IME_STARTCOMPOSITION = 0x010D;
@@ -2322,6 +2462,13 @@ public partial class Window : ContentControl, IWindowHost
 
     [LibraryImport("user32.dll", EntryPoint = "LoadCursorW")]
     private static partial nint LoadCursor(nint hInstance, nint lpCursorName);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint SetCursor(nint hCursor);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetCursorPos(out POINT lpPoint);
 
     [DllImport("user32.dll")]
     private static extern nint BeginPaint(nint hWnd, out PAINTSTRUCT lpPaint);

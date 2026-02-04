@@ -1,6 +1,8 @@
 using Jalium.UI.Input;
 using Jalium.UI.Media;
 
+using static Jalium.UI.Cursors;
+
 namespace Jalium.UI.Controls;
 
 /// <summary>
@@ -134,6 +136,7 @@ public class GridSplitter : Control
         Background = new SolidColorBrush(Color.FromRgb(60, 60, 60));
         HorizontalAlignment = HorizontalAlignment.Stretch;
         VerticalAlignment = VerticalAlignment.Stretch;
+        Cursor = SizeWE; // Default to horizontal resize cursor
 
         AddHandler(MouseDownEvent, new RoutedEventHandler(OnMouseDownHandler));
         AddHandler(MouseUpEvent, new RoutedEventHandler(OnMouseUpHandler));
@@ -416,6 +419,16 @@ public class GridSplitter : Control
         }
     }
 
+    /// <inheritdoc />
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        var result = base.ArrangeOverride(finalSize);
+        // Update cursor after layout when we know the actual dimensions
+        // (needed for Auto resize direction which depends on dimensions)
+        UpdateCursor();
+        return result;
+    }
+
     #endregion
 
     #region Rendering
@@ -484,9 +497,21 @@ public class GridSplitter : Control
     {
         if (d is GridSplitter splitter)
         {
+            splitter.UpdateCursor();
             splitter.InvalidateMeasure();
             splitter.InvalidateVisual();
         }
+    }
+
+    /// <summary>
+    /// Updates the cursor based on the effective resize direction.
+    /// </summary>
+    private void UpdateCursor()
+    {
+        var direction = GetEffectiveResizeDirection();
+        Cursor = direction == GridResizeDirection.Columns
+            ? SizeWE    // Horizontal resize (left-right)
+            : SizeNS;   // Vertical resize (up-down)
     }
 
     #endregion

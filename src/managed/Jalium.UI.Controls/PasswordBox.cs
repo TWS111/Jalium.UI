@@ -570,6 +570,7 @@ public class PasswordBox : Control, IImeSupport
     /// <inheritdoc />
     protected override Size MeasureOverride(Size availableSize)
     {
+        // PasswordBox always uses direct rendering (doesn't extend TextBoxBase for security)
         var padding = Padding;
         var border = BorderThickness;
         var lineHeight = Math.Round(GetLineHeight());
@@ -598,33 +599,17 @@ public class PasswordBox : Control, IImeSupport
         var bounds = new Rect(0, 0, RenderSize.Width, RenderSize.Height);
         var lineHeight = Math.Round(GetLineHeight());
 
-        // Draw background
+        // Draw background and border
+        var cornerRadius = CornerRadius;
         if (Background != null)
         {
-            var cornerRadius = CornerRadius;
-            if (cornerRadius.TopLeft > 0)
-            {
-                dc.DrawRoundedRectangle(Background, null, bounds, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(Background, null, bounds);
-            }
+            dc.DrawRoundedRectangle(Background, null, bounds, cornerRadius);
         }
 
-        // Draw border
         if (BorderBrush != null && border.Left > 0)
         {
             var borderPen = new Pen(BorderBrush, border.Left);
-            var cornerRadius = CornerRadius;
-            if (cornerRadius.TopLeft > 0)
-            {
-                dc.DrawRoundedRectangle(null, borderPen, bounds, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(null, borderPen, bounds);
-            }
+            dc.DrawRoundedRectangle(null, borderPen, bounds, cornerRadius);
         }
 
         // Content area

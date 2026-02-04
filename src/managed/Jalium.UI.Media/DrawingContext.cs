@@ -56,6 +56,114 @@ public abstract class DrawingContext : IDisposable, IClipDrawingContext
     public abstract void DrawRoundedRectangle(Brush? brush, Pen? pen, Rect rectangle, double radiusX, double radiusY);
 
     /// <summary>
+    /// Draws a rounded rectangle with potentially non-uniform corner radii.
+    /// </summary>
+    /// <param name="brush">The brush to fill with, or null for no fill.</param>
+    /// <param name="pen">The pen for the outline, or null for no outline.</param>
+    /// <param name="rectangle">The rectangle to draw.</param>
+    /// <param name="cornerRadius">The corner radius for each corner.</param>
+    public void DrawRoundedRectangle(Brush? brush, Pen? pen, Rect rectangle, CornerRadius cornerRadius)
+    {
+        // Fast path: no corner radius
+        if (cornerRadius.TopLeft == 0 && cornerRadius.TopRight == 0 &&
+            cornerRadius.BottomLeft == 0 && cornerRadius.BottomRight == 0)
+        {
+            DrawRectangle(brush, pen, rectangle);
+            return;
+        }
+
+        // Fast path: uniform corner radius
+        if (cornerRadius.TopLeft == cornerRadius.TopRight &&
+            cornerRadius.TopLeft == cornerRadius.BottomRight &&
+            cornerRadius.TopLeft == cornerRadius.BottomLeft)
+        {
+            DrawRoundedRectangle(brush, pen, rectangle, cornerRadius.TopLeft, cornerRadius.TopLeft);
+            return;
+        }
+
+        // Non-uniform corner radius: use PathGeometry
+        var geometry = CreateRoundedRectGeometry(rectangle, cornerRadius);
+        DrawGeometry(brush, pen, geometry);
+    }
+
+    /// <summary>
+    /// Creates a PathGeometry for a rounded rectangle with non-uniform corner radii.
+    /// </summary>
+    private static PathGeometry CreateRoundedRectGeometry(Rect rect, CornerRadius cornerRadius)
+    {
+        var geometry = new PathGeometry();
+        var figure = new PathFigure();
+
+        double x = rect.X;
+        double y = rect.Y;
+        double w = rect.Width;
+        double h = rect.Height;
+
+        // Clamp corner radii to half the minimum dimension
+        double maxRadius = Math.Min(w, h) / 2;
+        double tl = Math.Min(cornerRadius.TopLeft, maxRadius);
+        double tr = Math.Min(cornerRadius.TopRight, maxRadius);
+        double br = Math.Min(cornerRadius.BottomRight, maxRadius);
+        double bl = Math.Min(cornerRadius.BottomLeft, maxRadius);
+
+        // Start at top-left corner, after the arc
+        figure.StartPoint = new Point(x + tl, y);
+        figure.IsClosed = true;
+        figure.IsFilled = true;
+
+        // Top edge
+        figure.Segments.Add(new LineSegment(new Point(x + w - tr, y), true));
+
+        // Top-right corner
+        if (tr > 0)
+        {
+            figure.Segments.Add(new ArcSegment(
+                new Point(x + w, y + tr),
+                new Size(tr, tr),
+                0, false, SweepDirection.Clockwise, true));
+        }
+
+        // Right edge
+        figure.Segments.Add(new LineSegment(new Point(x + w, y + h - br), true));
+
+        // Bottom-right corner
+        if (br > 0)
+        {
+            figure.Segments.Add(new ArcSegment(
+                new Point(x + w - br, y + h),
+                new Size(br, br),
+                0, false, SweepDirection.Clockwise, true));
+        }
+
+        // Bottom edge
+        figure.Segments.Add(new LineSegment(new Point(x + bl, y + h), true));
+
+        // Bottom-left corner
+        if (bl > 0)
+        {
+            figure.Segments.Add(new ArcSegment(
+                new Point(x, y + h - bl),
+                new Size(bl, bl),
+                0, false, SweepDirection.Clockwise, true));
+        }
+
+        // Left edge
+        figure.Segments.Add(new LineSegment(new Point(x, y + tl), true));
+
+        // Top-left corner
+        if (tl > 0)
+        {
+            figure.Segments.Add(new ArcSegment(
+                new Point(x + tl, y),
+                new Size(tl, tl),
+                0, false, SweepDirection.Clockwise, true));
+        }
+
+        geometry.Figures.Add(figure);
+        return geometry;
+    }
+
+    /// <summary>
     /// Draws an ellipse.
     /// </summary>
     /// <param name="brush">The brush to fill with, or null for no fill.</param>

@@ -286,8 +286,6 @@ public class Thumb : Control
 
         var rect = new Rect(RenderSize);
         var cornerRadius = CornerRadius;
-        var hasCornerRadius = cornerRadius.TopLeft > 0 || cornerRadius.TopRight > 0 ||
-                              cornerRadius.BottomLeft > 0 || cornerRadius.BottomRight > 0;
 
         // Get visual state colors
         var bgBrush = Background ?? (IsDragging
@@ -297,27 +295,13 @@ public class Thumb : Control
         var borderBrush = BorderBrush;
 
         // Draw background
-        if (hasCornerRadius)
-        {
-            dc.DrawRoundedRectangle(bgBrush, null, rect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-        }
-        else
-        {
-            dc.DrawRectangle(bgBrush, null, rect);
-        }
+        dc.DrawRoundedRectangle(bgBrush, null, rect, cornerRadius);
 
         // Draw border
         if (borderBrush != null && BorderThickness.TotalWidth > 0)
         {
             var pen = new Pen(borderBrush, BorderThickness.Left);
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(null, pen, rect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(null, pen, rect);
-            }
+            dc.DrawRoundedRectangle(null, pen, rect, cornerRadius);
         }
 
         // Draw grip lines for visual feedback (3 horizontal lines)

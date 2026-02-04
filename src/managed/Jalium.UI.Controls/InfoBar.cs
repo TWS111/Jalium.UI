@@ -295,34 +295,19 @@ public class InfoBar : ContentControl
         var rect = new Rect(RenderSize);
         var padding = Padding;
         var cornerRadius = CornerRadius;
-        var hasCornerRadius = cornerRadius.TopLeft > 0;
 
         // Get severity colors
         var (bgColor, fgColor, iconColor) = GetSeverityColors();
 
         // Draw background
         var bgBrush = Background ?? new SolidColorBrush(bgColor);
-        if (hasCornerRadius)
-        {
-            dc.DrawRoundedRectangle(bgBrush, null, rect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-        }
-        else
-        {
-            dc.DrawRectangle(bgBrush, null, rect);
-        }
+        dc.DrawRoundedRectangle(bgBrush, null, rect, cornerRadius);
 
-        // Draw left accent bar
+        // Draw left accent bar (only left corners have radius)
         var accentRect = new Rect(0, 0, 4, rect.Height);
         var accentBrush = new SolidColorBrush(iconColor);
-        if (hasCornerRadius)
-        {
-            // Clip to corner radius on left side
-            dc.DrawRoundedRectangle(accentBrush, null, accentRect, cornerRadius.TopLeft, 0);
-        }
-        else
-        {
-            dc.DrawRectangle(accentBrush, null, accentRect);
-        }
+        var accentCornerRadius = new CornerRadius(cornerRadius.TopLeft, 0, 0, cornerRadius.BottomLeft);
+        dc.DrawRoundedRectangle(accentBrush, null, accentRect, accentCornerRadius);
 
         var currentX = padding.Left + 4; // After accent bar
 

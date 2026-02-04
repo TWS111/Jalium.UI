@@ -185,7 +185,6 @@ public class GroupBox : ContentControl
         var headerSize = MeasureHeader(RenderSize);
         var headerTextHeight = headerSize.Height;
         var cornerRadius = CornerRadius;
-        var hasCornerRadius = cornerRadius.TopLeft > 0;
 
         // Calculate the border rect (starts at half header height)
         var borderRect = new Rect(0, headerTextHeight / 2, rect.Width, rect.Height - headerTextHeight / 2);
@@ -193,14 +192,7 @@ public class GroupBox : ContentControl
         // Draw background
         if (Background != null)
         {
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(Background, null, borderRect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(Background, null, borderRect);
-            }
+            dc.DrawRoundedRectangle(Background, null, borderRect, cornerRadius);
         }
 
         // Draw border (with gap for header)
@@ -232,14 +224,7 @@ public class GroupBox : ContentControl
             else
             {
                 // Draw full border
-                if (hasCornerRadius)
-                {
-                    dc.DrawRoundedRectangle(null, pen, borderRect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-                }
-                else
-                {
-                    dc.DrawRectangle(null, pen, borderRect);
-                }
+                dc.DrawRoundedRectangle(null, pen, borderRect, cornerRadius);
             }
         }
 

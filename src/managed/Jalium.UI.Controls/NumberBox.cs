@@ -38,6 +38,12 @@ public class NumberBox : TextBoxBase, IImeSupport
     private bool _isUpButtonPressed;
     private bool _isDownButtonPressed;
 
+    // Template parts
+    private RepeatButton? _upSpinButton;
+    private RepeatButton? _downSpinButton;
+    private Border? _partContentHost;
+    private Grid? _layoutRoot;
+
     // Edit state
     private bool _isEditing;
     private bool _isUpdatingValue;
@@ -298,13 +304,6 @@ public class NumberBox : TextBoxBase, IImeSupport
     public NumberBox()
     {
         // Dark theme appearance
-        Background = new SolidColorBrush(Color.FromRgb(45, 45, 45));
-        BorderBrush = new SolidColorBrush(Color.FromRgb(100, 100, 100));
-        Foreground = new SolidColorBrush(Color.White);
-        BorderThickness = new Thickness(1);
-        Padding = new Thickness(8, 4, 8, 4);
-        CornerRadius = new CornerRadius(4);
-        FontSize = 14;
         Height = DefaultHeight;
 
         // Set IBeam cursor for text input
@@ -318,6 +317,201 @@ public class NumberBox : TextBoxBase, IImeSupport
         // Subscribe to focus events
         AddHandler(GotKeyboardFocusEvent, new RoutedEventHandler(OnGotFocusHandler));
         AddHandler(LostKeyboardFocusEvent, new RoutedEventHandler(OnLostFocusHandler));
+
+        // Subscribe to preview mouse events for direct spin button handling
+        // This ensures spin buttons work even if event routing has issues
+        AddHandler(PreviewMouseDownEvent, new RoutedEventHandler(OnPreviewMouseDownHandler));
+        AddHandler(PreviewMouseUpEvent, new RoutedEventHandler(OnPreviewMouseUpHandler));
+    }
+
+    private RepeatButton? _pressedSpinButton;
+
+    private void OnPreviewMouseDownHandler(object sender, RoutedEventArgs e)
+    {
+        if (!IsEnabled || SpinButtonPlacementMode == NumberBoxSpinButtonPlacementMode.Hidden)
+            return;
+
+        if (e is MouseButtonEventArgs mouseArgs && mouseArgs.ChangedButton == MouseButton.Left)
+        {
+            var position = mouseArgs.GetPosition(this);
+
+            // Check if click is in the spin button area
+            var spinAction = GetSpinActionAtPosition(position);
+            if (spinAction != SpinAction.None)
+            {
+                _currentSpinAction = spinAction;
+
+                // Set pressed state on the button if available (for visual feedback)
+                var hitButton = spinAction == SpinAction.Up ? _upSpinButton : _downSpinButton;
+                if (hitButton != null)
+                {
+                    _pressedSpinButton = hitButton;
+                    hitButton.SetIsPressed(true);
+                }
+
+                CaptureMouse();
+
+                // Fire the initial action immediately
+                if (spinAction == SpinAction.Up)
+                {
+                    StepUp();
+                }
+                else
+                {
+                    StepDown();
+                }
+
+                // Update text display even if in editing mode
+                _text = FormatValue(Value);
+                _caretIndex = _text.Length;
+                _selectionLength = 0;
+
+                // Force visual update
+                InvalidateVisual();
+                e.Handled = true;
+            }
+        }
+    }
+
+    private void OnPreviewMouseUpHandler(object sender, RoutedEventArgs e)
+    {
+        if (_currentSpinAction == SpinAction.None)
+            return;
+
+        if (e is MouseButtonEventArgs mouseArgs && mouseArgs.ChangedButton == MouseButton.Left)
+        {
+            // Reset button state
+            if (_pressedSpinButton != null)
+            {
+                _pressedSpinButton.SetIsPressed(false);
+                _pressedSpinButton = null;
+            }
+
+            ReleaseMouseCapture();
+            _currentSpinAction = SpinAction.None;
+            InvalidateVisual();
+            e.Handled = true;
+        }
+    }
+
+    private enum SpinAction { None, Up, Down }
+    private SpinAction _currentSpinAction = SpinAction.None;
+
+    private SpinAction GetSpinActionAtPosition(Point position)
+    {
+        // The spin buttons are in a 32px wide column on the right side
+        var spinButtonAreaLeft = RenderSize.Width - SpinButtonWidth;
+
+        // Check if click is in the spin button column
+        if (position.X < spinButtonAreaLeft || position.X > RenderSize.Width)
+            return SpinAction.None;
+
+        if (position.Y < 0 || position.Y > RenderSize.Height)
+            return SpinAction.None;
+
+        // Determine which button based on Y position (top half = up, bottom half = down)
+        var midY = RenderSize.Height / 2;
+
+        return position.Y < midY ? SpinAction.Up : SpinAction.Down;
+    }
+
+    /// <inheritdoc />
+    protected override void OnLostMouseCapture()
+    {
+        base.OnLostMouseCapture();
+
+        // Reset spin button state if we lose capture unexpectedly
+        if (_pressedSpinButton != null)
+        {
+            _pressedSpinButton.SetIsPressed(false);
+            _pressedSpinButton = null;
+        }
+        _currentSpinAction = SpinAction.None;
+    }
+
+    /// <inheritdoc />
+    protected override void OnApplyTemplate()
+    {
+        // Detach previous handlers
+        if (_upSpinButton != null)
+        {
+            _upSpinButton.Click -= OnUpButtonClick;
+        }
+        if (_downSpinButton != null)
+        {
+            _downSpinButton.Click -= OnDownButtonClick;
+        }
+
+        base.OnApplyTemplate();
+
+        // Get template parts
+        _layoutRoot = GetTemplateChild("PART_LayoutRoot") as Grid;
+        _partContentHost = GetTemplateChild("PART_ContentHost") as Border;
+        _upSpinButton = GetTemplateChild("PART_UpSpinButton") as RepeatButton;
+        _downSpinButton = GetTemplateChild("PART_DownSpinButton") as RepeatButton;
+
+        // Update corner radii based on NumberBox.CornerRadius
+        UpdateTemplateCornerRadii();
+
+        // Attach handlers
+        if (_upSpinButton != null)
+        {
+            _upSpinButton.Click += OnUpButtonClick;
+        }
+        if (_downSpinButton != null)
+        {
+            _downSpinButton.Click += OnDownButtonClick;
+        }
+    }
+
+    /// <summary>
+    /// Updates the corner radii of template parts based on the control's CornerRadius.
+    /// </summary>
+    private void UpdateTemplateCornerRadii()
+    {
+        var radius = CornerRadius;
+
+        // PART_ContentHost: left corners only (TopLeft, 0, 0, BottomLeft)
+        if (_partContentHost != null)
+        {
+            _partContentHost.CornerRadius = new CornerRadius(radius.TopLeft, 0, 0, radius.BottomLeft);
+        }
+
+        // PART_UpSpinButton: top-right corner only (0, TopRight, 0, 0)
+        if (_upSpinButton != null)
+        {
+            _upSpinButton.CornerRadius = new CornerRadius(0, radius.TopRight, 0, 0);
+            _upSpinButton.BorderThickness = new Thickness(BorderThickness.Left, 0, 0, 0);
+        }
+
+        // PART_DownSpinButton: bottom-right corner only (0, 0, BottomRight, 0)
+        if (_downSpinButton != null)
+        {
+            _downSpinButton.CornerRadius = new CornerRadius(0, 0, radius.BottomRight, 0);
+            _downSpinButton.BorderThickness = new Thickness(0, 0, BorderThickness.Right, 0);
+        }
+    }
+
+    /// <inheritdoc />
+    protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+
+        // Update template parts when CornerRadius changes
+        if (e.Property == CornerRadiusProperty)
+        {
+            UpdateTemplateCornerRadii();
+        }
+    }
+
+    private void OnUpButtonClick(object sender, RoutedEventArgs e)
+    {
+        StepUp();
+    }
+
+    private void OnDownButtonClick(object sender, RoutedEventArgs e)
+    {
+        StepDown();
     }
 
     private void OnGotFocusHandler(object sender, RoutedEventArgs e)
@@ -805,6 +999,13 @@ public class NumberBox : TextBoxBase, IImeSupport
     /// <inheritdoc />
     protected override Size MeasureOverride(Size availableSize)
     {
+        // If using template, delegate to base class which handles template root
+        if (Template != null)
+        {
+            return base.MeasureOverride(availableSize);
+        }
+
+        // Direct rendering mode
         var padding = Padding;
         var border = BorderThickness;
         var headerHeight = 0.0;
@@ -820,6 +1021,13 @@ public class NumberBox : TextBoxBase, IImeSupport
         var height = DefaultHeight + headerHeight;
 
         return new Size(width, height);
+    }
+
+    /// <inheritdoc />
+    internal override Size MeasureTextContent(Size availableSize)
+    {
+        var lineHeight = Math.Round(GetLineHeight());
+        return new Size(availableSize.Width, Math.Min(lineHeight, availableSize.Height));
     }
 
     #endregion
@@ -840,7 +1048,7 @@ public class NumberBox : TextBoxBase, IImeSupport
         var headerHeight = 0.0;
         var lineHeight = Math.Round(GetLineHeight());
 
-        // Draw header
+        // Draw header (always draw, regardless of template mode)
         if (Header is string headerText && Foreground != null)
         {
             var headerFormatted = new FormattedText(headerText, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14)
@@ -855,35 +1063,23 @@ public class NumberBox : TextBoxBase, IImeSupport
         // Input area rect
         var inputRect = new Rect(0, headerHeight, bounds.Width, bounds.Height - headerHeight);
 
-        // Draw background
-        if (Background != null)
+        // Draw background and border only in direct rendering mode (template provides these)
+        if (!HasContentHost)
         {
-            if (hasCornerRadius)
+            if (Background != null)
             {
-                dc.DrawRoundedRectangle(Background, null, inputRect, cornerRadius.TopLeft, cornerRadius.TopLeft);
+                dc.DrawRoundedRectangle(Background, null, inputRect, cornerRadius);
             }
-            else
+
+            var borderBrush = IsKeyboardFocused ? new SolidColorBrush(Color.FromRgb(0, 120, 212)) : BorderBrush;
+            if (borderBrush != null && border.TotalWidth > 0)
             {
-                dc.DrawRectangle(Background, null, inputRect);
+                var pen = new Pen(borderBrush, border.Left);
+                dc.DrawRoundedRectangle(null, pen, inputRect, cornerRadius);
             }
         }
 
-        // Draw border
-        var borderBrush = IsKeyboardFocused ? new SolidColorBrush(Color.FromRgb(0, 120, 212)) : BorderBrush;
-        if (borderBrush != null && border.TotalWidth > 0)
-        {
-            var pen = new Pen(borderBrush, border.Left);
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(null, pen, inputRect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(null, pen, inputRect);
-            }
-        }
-
-        // Calculate regions
+        // Calculate regions for spin buttons
         var spinButtonWidth = SpinButtonPlacementMode == NumberBoxSpinButtonPlacementMode.Hidden ? 0 : SpinButtonWidth;
         _textRect = new Rect(
             padding.Left,
@@ -891,7 +1087,8 @@ public class NumberBox : TextBoxBase, IImeSupport
             inputRect.Width - spinButtonWidth - padding.Left - padding.Right,
             inputRect.Height - padding.Top - padding.Bottom);
 
-        if (SpinButtonPlacementMode == NumberBoxSpinButtonPlacementMode.Inline)
+        // Draw spin buttons only in direct rendering mode (template provides buttons via PART_*)
+        if (SpinButtonPlacementMode == NumberBoxSpinButtonPlacementMode.Inline && !HasContentHost)
         {
             _upButtonRect = new Rect(inputRect.Right - SpinButtonWidth, inputRect.Top, SpinButtonWidth, inputRect.Height / 2);
             _downButtonRect = new Rect(inputRect.Right - SpinButtonWidth, inputRect.Top + inputRect.Height / 2, SpinButtonWidth, inputRect.Height / 2);
@@ -900,13 +1097,37 @@ public class NumberBox : TextBoxBase, IImeSupport
             DrawSpinButton(dc, _downButtonRect, false);
         }
 
+        // Render text content only in direct rendering mode (content host handles this)
+        if (!HasContentHost)
+        {
+            RenderTextContentCore(dc, _textRect, lineHeight);
+        }
+    }
+
+    /// <inheritdoc />
+    internal override void RenderTextContent(object drawingContext)
+    {
+        if (drawingContext is not DrawingContext dc)
+            return;
+
+        var lineHeight = Math.Round(GetLineHeight());
+        var contentRect = new Rect(0, 0, _textContentSize.Width, _textContentSize.Height);
+
+        RenderTextContentCore(dc, contentRect, lineHeight);
+    }
+
+    /// <summary>
+    /// Core text rendering logic used by both direct rendering and content host modes.
+    /// </summary>
+    private void RenderTextContentCore(DrawingContext dc, Rect contentRect, double lineHeight)
+    {
         // Clip to text area
-        dc.PushClip(new RectangleGeometry(_textRect));
+        dc.PushClip(new RectangleGeometry(contentRect));
 
         // Draw selection background
         if (_selectionLength > 0 && IsKeyboardFocused)
         {
-            DrawSelection(dc, _textRect, lineHeight);
+            DrawSelection(dc, contentRect, lineHeight);
         }
 
         // Draw text or placeholder
@@ -918,8 +1139,8 @@ public class NumberBox : TextBoxBase, IImeSupport
                 Foreground = new SolidColorBrush(Color.FromRgb(128, 128, 128))
             };
             TextMeasurement.MeasureText(placeholderFormatted);
-            var textY = _textRect.Top + (_textRect.Height - placeholderFormatted.Height) / 2;
-            dc.DrawText(placeholderFormatted, new Point(_textRect.Left - Math.Round(_horizontalOffset), textY));
+            var textY = contentRect.Top + (contentRect.Height - placeholderFormatted.Height) / 2;
+            dc.DrawText(placeholderFormatted, new Point(contentRect.Left - Math.Round(_horizontalOffset), textY));
         }
         else if (!string.IsNullOrEmpty(displayText))
         {
@@ -928,20 +1149,20 @@ public class NumberBox : TextBoxBase, IImeSupport
                 Foreground = Foreground ?? new SolidColorBrush(Color.White)
             };
             TextMeasurement.MeasureText(valueFormatted);
-            var textY = _textRect.Top + (_textRect.Height - valueFormatted.Height) / 2;
-            dc.DrawText(valueFormatted, new Point(_textRect.Left - Math.Round(_horizontalOffset), textY));
+            var textY = contentRect.Top + (contentRect.Height - valueFormatted.Height) / 2;
+            dc.DrawText(valueFormatted, new Point(contentRect.Left - Math.Round(_horizontalOffset), textY));
         }
 
         // Draw IME composition
         if (_isImeComposing && !string.IsNullOrEmpty(_imeCompositionString))
         {
-            DrawImeComposition(dc, _textRect, lineHeight);
+            DrawImeComposition(dc, contentRect, lineHeight);
         }
 
         // Draw caret
         if (IsFocused && !IsReadOnly)
         {
-            DrawCaret(dc, _textRect, lineHeight);
+            DrawCaret(dc, contentRect, lineHeight);
         }
 
         dc.Pop(); // Pop clip
