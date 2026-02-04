@@ -796,6 +796,13 @@ public class AutoCompleteBox : TextBoxBase, IImeSupport
     /// <inheritdoc />
     protected override Size MeasureOverride(Size availableSize)
     {
+        // If using template, delegate to base class which handles template root
+        if (Template != null)
+        {
+            return base.MeasureOverride(availableSize);
+        }
+
+        // Direct rendering mode
         var width = double.IsPositiveInfinity(availableSize.Width) ? 200 : availableSize.Width;
         var height = DefaultHeight;
 
@@ -809,6 +816,13 @@ public class AutoCompleteBox : TextBoxBase, IImeSupport
         return new Size(width, height);
     }
 
+    /// <inheritdoc />
+    internal override Size MeasureTextContent(Size availableSize)
+    {
+        var lineHeight = Math.Round(GetLineHeight());
+        return new Size(availableSize.Width, Math.Min(lineHeight, availableSize.Height));
+    }
+
     #endregion
 
     #region Rendering
@@ -816,41 +830,37 @@ public class AutoCompleteBox : TextBoxBase, IImeSupport
     /// <inheritdoc />
     protected override void OnRender(object drawingContext)
     {
-        if (drawingContext is not DrawingContext dc)
+        // If using content host, text rendering is handled by TextBoxContentHost
+        // But AutoCompleteBox still needs to draw dropdown
+        if (HasContentHost)
+        {
+            if (drawingContext is DrawingContext dc && IsDropDownOpen && FilteredItems.Count > 0)
+            {
+                DrawDropDown(dc);
+            }
+            return;
+        }
+
+        // Direct rendering mode
+        if (drawingContext is not DrawingContext directDc)
             return;
 
         var inputRect = new Rect(0, 0, RenderSize.Width, DefaultHeight);
         var cornerRadius = CornerRadius;
-        var hasCornerRadius = cornerRadius.TopLeft > 0;
         var lineHeight = Math.Round(GetLineHeight());
         var padding = Padding;
 
-        // Draw background
+        // Draw background and border
         if (Background != null)
         {
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(Background, null, inputRect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(Background, null, inputRect);
-            }
+            directDc.DrawRoundedRectangle(Background, null, inputRect, cornerRadius);
         }
 
-        // Draw border
         var borderBrush = IsFocused ? new SolidColorBrush(Color.FromRgb(0, 120, 212)) : BorderBrush;
         if (borderBrush != null && BorderThickness.TotalWidth > 0)
         {
             var pen = new Pen(borderBrush, BorderThickness.Left);
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(null, pen, inputRect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(null, pen, inputRect);
-            }
+            directDc.DrawRoundedRectangle(null, pen, inputRect, cornerRadius);
         }
 
         // Content area
@@ -860,6 +870,33 @@ public class AutoCompleteBox : TextBoxBase, IImeSupport
             Math.Max(0, inputRect.Width - padding.Left - padding.Right),
             Math.Max(0, inputRect.Height - padding.Top - padding.Bottom));
 
+        // Render text content
+        RenderTextContentCore(directDc, contentRect, lineHeight);
+
+        // Draw drop-down
+        if (IsDropDownOpen && FilteredItems.Count > 0)
+        {
+            DrawDropDown(directDc);
+        }
+    }
+
+    /// <inheritdoc />
+    internal override void RenderTextContent(object drawingContext)
+    {
+        if (drawingContext is not DrawingContext dc)
+            return;
+
+        var lineHeight = Math.Round(GetLineHeight());
+        var contentRect = new Rect(0, 0, _textContentSize.Width, _textContentSize.Height);
+
+        RenderTextContentCore(dc, contentRect, lineHeight);
+    }
+
+    /// <summary>
+    /// Core text rendering logic used by both direct rendering and content host modes.
+    /// </summary>
+    private void RenderTextContentCore(DrawingContext dc, Rect contentRect, double lineHeight)
+    {
         // Clip to content area
         dc.PushClip(new RectangleGeometry(contentRect));
 
@@ -877,8 +914,8 @@ public class AutoCompleteBox : TextBoxBase, IImeSupport
                 Foreground = new SolidColorBrush(Color.FromRgb(128, 128, 128))
             };
             TextMeasurement.MeasureText(watermarkText);
-            var textY = (DefaultHeight - watermarkText.Height) / 2;
-            dc.DrawText(watermarkText, new Point(contentRect.X - Math.Round(_horizontalOffset), textY));
+            var textY = (contentRect.Height - watermarkText.Height) / 2;
+            dc.DrawText(watermarkText, new Point(contentRect.X - Math.Round(_horizontalOffset), contentRect.Y + textY));
         }
         else if (!string.IsNullOrEmpty(_text))
         {
@@ -887,8 +924,8 @@ public class AutoCompleteBox : TextBoxBase, IImeSupport
                 Foreground = Foreground ?? new SolidColorBrush(Color.White)
             };
             TextMeasurement.MeasureText(formattedText);
-            var textY = (DefaultHeight - formattedText.Height) / 2;
-            dc.DrawText(formattedText, new Point(contentRect.X - Math.Round(_horizontalOffset), textY));
+            var textY = (contentRect.Height - formattedText.Height) / 2;
+            dc.DrawText(formattedText, new Point(contentRect.X - Math.Round(_horizontalOffset), contentRect.Y + textY));
         }
 
         // Draw IME composition
@@ -904,12 +941,6 @@ public class AutoCompleteBox : TextBoxBase, IImeSupport
         }
 
         dc.Pop(); // Pop clip
-
-        // Draw drop-down
-        if (IsDropDownOpen && FilteredItems.Count > 0)
-        {
-            DrawDropDown(dc);
-        }
     }
 
     private void DrawSelection(DrawingContext dc, Rect contentRect, double lineHeight)
@@ -923,7 +954,7 @@ public class AutoCompleteBox : TextBoxBase, IImeSupport
 
         var startX = Math.Round(contentRect.X + MeasureTextWidth(textBefore) - roundedHorizontalOffset);
         var width = Math.Max(Math.Round(MeasureTextWidth(selectedText)), 1);
-        var textY = (DefaultHeight - lineHeight) / 2;
+        var textY = contentRect.Y + (contentRect.Height - lineHeight) / 2;
 
         var selRect = new Rect(startX, textY, width, lineHeight);
         dc.DrawRectangle(SelectionBrush, null, selRect);
@@ -937,7 +968,7 @@ public class AutoCompleteBox : TextBoxBase, IImeSupport
         var roundedHorizontalOffset = Math.Round(_horizontalOffset);
         var textBeforeCaret = _text.Substring(0, Math.Min(_caretIndex, _text.Length));
         var x = Math.Round(contentRect.X + MeasureTextWidth(textBeforeCaret) - roundedHorizontalOffset);
-        var textY = (DefaultHeight - lineHeight) / 2;
+        var textY = contentRect.Y + (contentRect.Height - lineHeight) / 2;
 
         var compositionWidth = MeasureTextWidth(_imeCompositionString);
         var compositionBgBrush = new SolidColorBrush(Color.FromRgb(60, 60, 80));
@@ -967,7 +998,7 @@ public class AutoCompleteBox : TextBoxBase, IImeSupport
 
         var roundedHorizontalOffset = Math.Round(_horizontalOffset);
         var x = Math.Round(contentRect.X + MeasureTextWidth(textBeforeCaret) - roundedHorizontalOffset);
-        var textY = (DefaultHeight - lineHeight) / 2;
+        var textY = contentRect.Y + (contentRect.Height - lineHeight) / 2;
 
         Brush caretBrushWithOpacity;
         if (CaretBrush is SolidColorBrush solidBrush)

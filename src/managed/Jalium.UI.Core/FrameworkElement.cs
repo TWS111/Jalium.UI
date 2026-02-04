@@ -107,6 +107,29 @@ public class FrameworkElement : UIElement
 
     #endregion
 
+    #region SizeChanged Event
+
+    /// <summary>
+    /// The previous render size, used to detect size changes.
+    /// </summary>
+    private Size _previousRenderSize;
+
+    /// <summary>
+    /// Occurs when either ActualWidth or ActualHeight properties change value.
+    /// </summary>
+    public event SizeChangedEventHandler? SizeChanged;
+
+    /// <summary>
+    /// Called when the render size changes.
+    /// </summary>
+    /// <param name="sizeInfo">Details of the size change.</param>
+    protected virtual void OnSizeChanged(SizeChangedInfo sizeInfo)
+    {
+        SizeChanged?.Invoke(this, new SizeChangedEventArgs(sizeInfo));
+    }
+
+    #endregion
+
     #region Internal Fields
 
     /// <summary>
@@ -649,6 +672,18 @@ public class FrameworkElement : UIElement
         // Set visual bounds for rendering
         _visualBounds = new Rect(x, y, renderSize.Width, renderSize.Height);
 
+        // Check for size change and raise SizeChanged event
+        if (renderSize != _previousRenderSize)
+        {
+            var widthChanged = renderSize.Width != _previousRenderSize.Width;
+            var heightChanged = renderSize.Height != _previousRenderSize.Height;
+
+            var sizeInfo = new SizeChangedInfo(this, _previousRenderSize, widthChanged, heightChanged);
+            _previousRenderSize = renderSize;
+
+            OnSizeChanged(sizeInfo);
+        }
+
         return renderSize;
     }
 
@@ -982,3 +1017,92 @@ public class RequestBringIntoViewEventArgs : RoutedEventArgs
 /// Delegate for handling RequestBringIntoView events.
 /// </summary>
 public delegate void RequestBringIntoViewEventHandler(object sender, RequestBringIntoViewEventArgs e);
+
+/// <summary>
+/// Delegate for handling SizeChanged events.
+/// </summary>
+public delegate void SizeChangedEventHandler(object sender, SizeChangedEventArgs e);
+
+/// <summary>
+/// Provides data for the SizeChanged event.
+/// </summary>
+public class SizeChangedEventArgs : EventArgs
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SizeChangedEventArgs"/> class.
+    /// </summary>
+    /// <param name="info">Information about the size change.</param>
+    public SizeChangedEventArgs(SizeChangedInfo info)
+    {
+        PreviousSize = info.PreviousSize;
+        NewSize = info.NewSize;
+        WidthChanged = info.WidthChanged;
+        HeightChanged = info.HeightChanged;
+    }
+
+    /// <summary>
+    /// Gets the previous size of the element.
+    /// </summary>
+    public Size PreviousSize { get; }
+
+    /// <summary>
+    /// Gets the new size of the element.
+    /// </summary>
+    public Size NewSize { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the width component changed.
+    /// </summary>
+    public bool WidthChanged { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the height component changed.
+    /// </summary>
+    public bool HeightChanged { get; }
+}
+
+/// <summary>
+/// Contains information about a size change.
+/// </summary>
+public class SizeChangedInfo
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SizeChangedInfo"/> class.
+    /// </summary>
+    /// <param name="element">The element whose size changed.</param>
+    /// <param name="previousSize">The previous size.</param>
+    /// <param name="widthChanged">Whether the width changed.</param>
+    /// <param name="heightChanged">Whether the height changed.</param>
+    public SizeChangedInfo(UIElement element, Size previousSize, bool widthChanged, bool heightChanged)
+    {
+        Element = element;
+        PreviousSize = previousSize;
+        WidthChanged = widthChanged;
+        HeightChanged = heightChanged;
+    }
+
+    /// <summary>
+    /// Gets the element that was measured.
+    /// </summary>
+    public UIElement Element { get; }
+
+    /// <summary>
+    /// Gets the previous size of the element before the size change.
+    /// </summary>
+    public Size PreviousSize { get; }
+
+    /// <summary>
+    /// Gets the new size of the element. This is the element's current RenderSize.
+    /// </summary>
+    public Size NewSize => Element.RenderSize;
+
+    /// <summary>
+    /// Gets a value indicating whether the Width component of the size changed.
+    /// </summary>
+    public bool WidthChanged { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the Height component of the size changed.
+    /// </summary>
+    public bool HeightChanged { get; }
+}

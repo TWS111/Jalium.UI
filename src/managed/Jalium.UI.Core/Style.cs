@@ -166,15 +166,27 @@ public class Setter
         var target = GetTarget(element);
         if (target != null)
         {
+            // Resolve the actual property on the target type
+            // This handles the case where the property was resolved against the Style's TargetType
+            // but the setter targets a different element type via TargetName
+            var actualProperty = ResolvePropertyForTarget(Property, target);
+            if (actualProperty == null)
+                return;
+
+            // Don't override local values - WPF style behavior
+            // Local values have higher precedence than style values
+            if (target.HasLocalValue(actualProperty))
+                return;
+
             // Store original value for restoration
-            if (!target._styleOriginalValues.ContainsKey(Property))
+            if (!target._styleOriginalValues.ContainsKey(actualProperty))
             {
-                target._styleOriginalValues[Property] = target.GetValue(Property);
+                target._styleOriginalValues[actualProperty] = target.GetValue(actualProperty);
             }
 
             // Convert value to the correct type if needed
-            var valueToSet = ConvertValueIfNeeded(Value, Property.PropertyType);
-            target.SetValue(Property, valueToSet);
+            var valueToSet = ConvertValueIfNeeded(Value, actualProperty.PropertyType);
+            target.SetValue(actualProperty, valueToSet);
         }
     }
 
@@ -199,9 +211,52 @@ public class Setter
                 return bool.Parse(stringValue);
             if (targetType.IsEnum)
                 return Enum.Parse(targetType, stringValue, ignoreCase: true);
+            if (targetType == typeof(CornerRadius))
+                return ParseCornerRadius(stringValue);
+            if (targetType == typeof(Thickness))
+                return ParseThickness(stringValue);
         }
 
         return value;
+    }
+
+    /// <summary>
+    /// Parses a CornerRadius from a string value.
+    /// </summary>
+    private static CornerRadius ParseCornerRadius(string value)
+    {
+        var parts = value.Split(',', ' ').Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+        return parts.Length switch
+        {
+            1 => new CornerRadius(double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture)),
+            4 => new CornerRadius(
+                double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[3], System.Globalization.CultureInfo.InvariantCulture)),
+            _ => new CornerRadius(0)
+        };
+    }
+
+    /// <summary>
+    /// Parses a Thickness from a string value.
+    /// </summary>
+    private static Thickness ParseThickness(string value)
+    {
+        var parts = value.Split(',', ' ').Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+        return parts.Length switch
+        {
+            1 => new Thickness(double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture)),
+            2 => new Thickness(
+                double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture)),
+            4 => new Thickness(
+                double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[3], System.Globalization.CultureInfo.InvariantCulture)),
+            _ => new Thickness(0)
+        };
     }
 
     /// <summary>
@@ -212,11 +267,52 @@ public class Setter
         if (Property == null) return;
 
         var target = GetTarget(element);
-        if (target != null && target._styleOriginalValues.TryGetValue(Property, out var originalValue))
+        if (target == null) return;
+
+        // Resolve the actual property on the target type
+        var actualProperty = ResolvePropertyForTarget(Property, target);
+        if (actualProperty == null) return;
+
+        if (target._styleOriginalValues.TryGetValue(actualProperty, out var originalValue))
         {
-            target.SetValue(Property, originalValue);
-            target._styleOriginalValues.Remove(Property);
+            target.SetValue(actualProperty, originalValue);
+            target._styleOriginalValues.Remove(actualProperty);
         }
+    }
+
+    /// <summary>
+    /// Resolves the actual DependencyProperty for the target element type.
+    /// This handles the case where the property was resolved against the Style's TargetType
+    /// but the setter targets a different element type via TargetName.
+    /// </summary>
+    private static DependencyProperty? ResolvePropertyForTarget(DependencyProperty originalProperty, FrameworkElement target)
+    {
+        var targetType = target.GetType();
+
+        // If the property is already from this type or an ancestor, use it directly
+        if (originalProperty.OwnerType.IsAssignableFrom(targetType))
+        {
+            return originalProperty;
+        }
+
+        // Try to find the property by name on the target type
+        var propertyName = originalProperty.Name;
+        var fieldName = $"{propertyName}Property";
+
+        var currentType = targetType;
+        while (currentType != null && currentType != typeof(object))
+        {
+            var dpField = currentType.GetField(fieldName,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
+            if (dpField != null && dpField.FieldType == typeof(DependencyProperty))
+            {
+                return dpField.GetValue(null) as DependencyProperty;
+            }
+            currentType = currentType.BaseType;
+        }
+
+        // Fallback to the original property
+        return originalProperty;
     }
 
     private FrameworkElement? GetTarget(FrameworkElement element)
@@ -288,6 +384,12 @@ public abstract class Trigger
     internal Style? ParentStyle { get; set; }
 
     /// <summary>
+    /// Gets or sets the parent template triggers collection.
+    /// This is set when the trigger is attached as part of a ControlTemplate.
+    /// </summary>
+    internal IList<Trigger>? ParentTemplateTriggers { get; set; }
+
+    /// <summary>
     /// Attaches this trigger to the specified element.
     /// </summary>
     internal abstract void Attach(FrameworkElement element);
@@ -319,7 +421,14 @@ public abstract class Trigger
             if (target == null)
                 continue;
 
-            var key = (target, setter.Property);
+            // Resolve the actual property on the target type
+            // This is important when TargetName is set and the target is a different type
+            // (e.g., Setter targets a Border but was parsed with Style TargetType=Button)
+            var actualProperty = ResolvePropertyForTarget(setter.Property, target);
+            if (actualProperty == null)
+                continue;
+
+            var key = (target, actualProperty);
 
             // Use the styled element's shared storage for original values
             // This ensures we store the value BEFORE any trigger modified it
@@ -331,7 +440,7 @@ public abstract class Trigger
             else
             {
                 // This is the first trigger affecting this property, store the original value
-                var originalValue = target.GetValue(setter.Property);
+                var originalValue = target.GetValue(actualProperty);
                 element._triggerOriginalValues[key] = (originalValue, 1);
             }
 
@@ -339,12 +448,47 @@ public abstract class Trigger
             _activeSetters.Add(key);
 
             // Convert value to the correct type if needed and apply
-            var valueToSet = ConvertValueIfNeeded(setter.Value, setter.Property.PropertyType);
-            target.SetValue(setter.Property, valueToSet);
+            var valueToSet = ConvertValueIfNeeded(setter.Value, actualProperty.PropertyType);
+            target.SetValue(actualProperty, valueToSet);
         }
 
         // Invalidate visual to ensure re-render
         element.InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Resolves the actual DependencyProperty for the target element type.
+    /// This handles the case where the property was resolved against the Style's TargetType
+    /// but the setter targets a different element type via TargetName.
+    /// </summary>
+    private static DependencyProperty? ResolvePropertyForTarget(DependencyProperty originalProperty, FrameworkElement target)
+    {
+        var targetType = target.GetType();
+
+        // If the property is already from this type or an ancestor, use it directly
+        if (originalProperty.OwnerType.IsAssignableFrom(targetType))
+        {
+            return originalProperty;
+        }
+
+        // Try to find the property by name on the target type
+        var propertyName = originalProperty.Name;
+        var fieldName = $"{propertyName}Property";
+
+        var currentType = targetType;
+        while (currentType != null && currentType != typeof(object))
+        {
+            var dpField = currentType.GetField(fieldName,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly);
+            if (dpField != null && dpField.FieldType == typeof(DependencyProperty))
+            {
+                return dpField.GetValue(null) as DependencyProperty;
+            }
+            currentType = currentType.BaseType;
+        }
+
+        // Fallback to the original property
+        return originalProperty;
     }
 
     /// <summary>
@@ -372,9 +516,52 @@ public abstract class Trigger
                 return bool.Parse(stringValue);
             if (actualType.IsEnum)
                 return Enum.Parse(actualType, stringValue, ignoreCase: true);
+            if (actualType == typeof(CornerRadius))
+                return ParseCornerRadius(stringValue);
+            if (actualType == typeof(Thickness))
+                return ParseThickness(stringValue);
         }
 
         return value;
+    }
+
+    /// <summary>
+    /// Parses a CornerRadius from a string value.
+    /// </summary>
+    private static CornerRadius ParseCornerRadius(string value)
+    {
+        var parts = value.Split(',', ' ').Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+        return parts.Length switch
+        {
+            1 => new CornerRadius(double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture)),
+            4 => new CornerRadius(
+                double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[3], System.Globalization.CultureInfo.InvariantCulture)),
+            _ => new CornerRadius(0)
+        };
+    }
+
+    /// <summary>
+    /// Parses a Thickness from a string value.
+    /// </summary>
+    private static Thickness ParseThickness(string value)
+    {
+        var parts = value.Split(',', ' ').Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+        return parts.Length switch
+        {
+            1 => new Thickness(double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture)),
+            2 => new Thickness(
+                double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture)),
+            4 => new Thickness(
+                double.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture),
+                double.Parse(parts[3], System.Globalization.CultureInfo.InvariantCulture)),
+            _ => new Thickness(0)
+        };
     }
 
     /// <summary>
@@ -397,7 +584,12 @@ public abstract class Trigger
             if (target == null)
                 continue;
 
-            var key = (target, setter.Property);
+            // Resolve the actual property on the target type
+            var actualProperty = ResolvePropertyForTarget(setter.Property, target);
+            if (actualProperty == null)
+                continue;
+
+            var key = (target, actualProperty);
 
             // Check if this trigger actually set this property
             if (!_activeSetters.Contains(key))
@@ -412,7 +604,7 @@ public abstract class Trigger
                 if (newCount <= 0)
                 {
                     // No more triggers affecting this property, restore original value
-                    target.SetValue(setter.Property, stored.OriginalValue);
+                    target.SetValue(actualProperty, stored.OriginalValue);
                     element._triggerOriginalValues.Remove(key);
                 }
                 else
@@ -427,26 +619,36 @@ public abstract class Trigger
         // Re-apply any other still-active triggers that affect the same properties
         // This ensures that if trigger A deactivates but trigger B is still active,
         // trigger B's values are re-applied
-        if (ParentStyle != null && needsReapply.Count > 0)
+        if (needsReapply.Count > 0)
         {
-            foreach (var otherTrigger in ParentStyle.Triggers)
+            // Collect triggers to check - from ParentStyle or from ParentTemplateTriggers
+            IEnumerable<Trigger>? triggersToCheck = ParentStyle?.Triggers ?? ParentTemplateTriggers;
+
+            if (triggersToCheck != null)
             {
-                if (otherTrigger == this) continue;
-                if (!otherTrigger.IsActiveForElement(element)) continue;
-
-                foreach (var setter in otherTrigger.Setters)
+                foreach (var otherTrigger in triggersToCheck)
                 {
-                    if (setter.Property == null) continue;
+                    if (otherTrigger == this) continue;
+                    if (!otherTrigger.IsActiveForElement(element)) continue;
 
-                    var target = GetSetterTarget(element, setter.TargetName);
-                    if (target == null) continue;
-
-                    var key = (target, setter.Property);
-                    if (needsReapply.Contains(key))
+                    foreach (var setter in otherTrigger.Setters)
                     {
-                        // This property needs another trigger's value re-applied
-                        var valueToSet = ConvertValueIfNeeded(setter.Value, setter.Property.PropertyType);
-                        target.SetValue(setter.Property, valueToSet);
+                        if (setter.Property == null) continue;
+
+                        var target = GetSetterTarget(element, setter.TargetName);
+                        if (target == null) continue;
+
+                        // Resolve the actual property on the target type
+                        var actualProperty = ResolvePropertyForTarget(setter.Property, target);
+                        if (actualProperty == null) continue;
+
+                        var key = (target, actualProperty);
+                        if (needsReapply.Contains(key))
+                        {
+                            // This property needs another trigger's value re-applied
+                            var valueToSet = ConvertValueIfNeeded(setter.Value, actualProperty.PropertyType);
+                            target.SetValue(actualProperty, valueToSet);
+                        }
                     }
                 }
             }

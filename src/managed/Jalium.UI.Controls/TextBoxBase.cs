@@ -1,6 +1,9 @@
 using System.Timers;
+using Jalium.UI.Controls.Primitives;
 using Jalium.UI.Input;
 using Jalium.UI.Media;
+
+using static Jalium.UI.Cursors;
 
 namespace Jalium.UI.Controls;
 
@@ -9,6 +12,30 @@ namespace Jalium.UI.Controls;
 /// </summary>
 public abstract class TextBoxBase : Control
 {
+    #region Content Host Fields
+
+    /// <summary>
+    /// The content host element from the template (PART_ContentHost).
+    /// </summary>
+    private FrameworkElement? _contentHost;
+
+    /// <summary>
+    /// The text rendering element inserted into the content host.
+    /// </summary>
+    private TextBoxContentHost? _textBoxContentHost;
+
+    /// <summary>
+    /// The bounds of the content area for text rendering (set by ArrangeTextContent).
+    /// </summary>
+    protected Size _textContentSize;
+
+    /// <summary>
+    /// Whether content host mode is active (template with PART_ContentHost).
+    /// </summary>
+    protected bool HasContentHost => _textBoxContentHost != null;
+
+    #endregion
+
     #region Fields
 
     /// <summary>
@@ -375,6 +402,7 @@ public abstract class TextBoxBase : Control
     protected TextBoxBase()
     {
         Focusable = true;
+        Cursor = IBeam; // Text input cursor for text editing controls
 
         _lastCaretBlink = DateTime.Now;
         _lastClickTime = DateTime.MinValue;
@@ -387,6 +415,123 @@ public abstract class TextBoxBase : Control
         AddHandler(TextInputEvent, new RoutedEventHandler(OnTextInputHandler));
         AddHandler(MouseWheelEvent, new RoutedEventHandler(OnMouseWheelHandler));
     }
+
+    #endregion
+
+    #region Template Handling
+
+    /// <inheritdoc />
+    protected override void OnApplyTemplate()
+    {
+        base.OnApplyTemplate();
+
+        // Clean up previous content host
+        if (_contentHost != null && _textBoxContentHost != null)
+        {
+            RemoveContentHostChild(_contentHost, _textBoxContentHost);
+            _textBoxContentHost = null;
+            _contentHost = null;
+        }
+
+        // Find PART_ContentHost in the template
+        var contentHost = GetTemplateChild("PART_ContentHost") as FrameworkElement;
+        if (contentHost != null)
+        {
+            _contentHost = contentHost;
+
+            // Create the text rendering element
+            _textBoxContentHost = new TextBoxContentHost(this);
+
+            // Insert into the content host
+            AddContentHostChild(_contentHost, _textBoxContentHost);
+        }
+    }
+
+    /// <summary>
+    /// Adds the text rendering element to the content host.
+    /// </summary>
+    private void AddContentHostChild(FrameworkElement host, TextBoxContentHost child)
+    {
+        // Support different container types
+        if (host is Border border)
+        {
+            border.Child = child;
+        }
+        else if (host is ContentControl contentControl)
+        {
+            contentControl.Content = child;
+        }
+        else if (host is ScrollViewer scrollViewer)
+        {
+            scrollViewer.Content = child;
+        }
+        else if (host is Panel panel)
+        {
+            panel.Children.Add(child);
+        }
+    }
+
+    /// <summary>
+    /// Removes the text rendering element from the content host.
+    /// </summary>
+    private void RemoveContentHostChild(FrameworkElement host, TextBoxContentHost child)
+    {
+        if (host is Border border)
+        {
+            if (border.Child == child)
+                border.Child = null;
+        }
+        else if (host is ContentControl contentControl)
+        {
+            if (contentControl.Content == child)
+                contentControl.Content = null;
+        }
+        else if (host is ScrollViewer scrollViewer)
+        {
+            if (scrollViewer.Content == child)
+                scrollViewer.Content = null;
+        }
+        else if (host is Panel panel)
+        {
+            panel.Children.Remove(child);
+        }
+    }
+
+    /// <summary>
+    /// Measures the text content. Called by TextBoxContentHost.
+    /// </summary>
+    internal virtual Size MeasureTextContent(Size availableSize)
+    {
+        // Default implementation - subclasses should override
+        var lineHeight = Math.Round(GetLineHeight());
+        var lineCount = GetLineCount();
+
+        double textHeight;
+        if (lineCount > 1)
+        {
+            textHeight = lineCount * lineHeight;
+        }
+        else
+        {
+            textHeight = lineHeight;
+        }
+
+        return new Size(availableSize.Width, Math.Min(textHeight, availableSize.Height));
+    }
+
+    /// <summary>
+    /// Arranges the text content. Called by TextBoxContentHost.
+    /// </summary>
+    internal virtual void ArrangeTextContent(Size finalSize)
+    {
+        _textContentSize = finalSize;
+    }
+
+    /// <summary>
+    /// Renders the text content. Called by TextBoxContentHost.
+    /// Override in subclasses to implement actual text rendering.
+    /// </summary>
+    internal abstract void RenderTextContent(object drawingContext);
 
     #endregion
 
@@ -1090,6 +1235,10 @@ public abstract class TextBoxBase : Control
     {
         if (!IsEnabled) return;
 
+        // Don't handle clicks that originated from buttons in the template
+        if (e.OriginalSource is DependencyObject source && IsInsideButton(source))
+            return;
+
         if (e is MouseButtonEventArgs mouseArgs && mouseArgs.ChangedButton == MouseButton.Left)
         {
             Focus();
@@ -1163,6 +1312,10 @@ public abstract class TextBoxBase : Control
     {
         if (!IsEnabled) return;
 
+        // Don't handle clicks that originated from buttons in the template
+        if (e.OriginalSource is DependencyObject source && IsInsideButton(source))
+            return;
+
         if (e is MouseButtonEventArgs mouseArgs && mouseArgs.ChangedButton == MouseButton.Left)
         {
             if (_isSelecting)
@@ -1173,6 +1326,22 @@ public abstract class TextBoxBase : Control
 
             e.Handled = true;
         }
+    }
+
+    /// <summary>
+    /// Checks if the given element is inside a ButtonBase control.
+    /// Used to allow clicks on buttons in templates to pass through.
+    /// </summary>
+    private static bool IsInsideButton(DependencyObject element)
+    {
+        var current = element;
+        while (current != null)
+        {
+            if (current is ButtonBase)
+                return true;
+            current = (current as UIElement)?.VisualParent;
+        }
+        return false;
     }
 
     private void OnMouseMoveHandler(object sender, RoutedEventArgs e)

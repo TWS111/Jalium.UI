@@ -349,9 +349,86 @@ public sealed class RenderTargetDrawingContext : DrawingContext, IOffsetDrawingC
 
     private List<Point> GetArcPoints(Point start, ArcSegment arc)
     {
-        // Simple approximation: connect with lines
-        // For full arc support, would need to compute arc points
-        var points = new List<Point> { arc.Point };
+        var points = new List<Point>();
+        var end = arc.Point;
+        var rx = arc.Size.Width;
+        var ry = arc.Size.Height;
+
+        // Handle degenerate cases
+        if (rx == 0 || ry == 0 || (start.X == end.X && start.Y == end.Y))
+        {
+            points.Add(end);
+            return points;
+        }
+
+        // Convert endpoint parameterization to center parameterization
+        // Based on SVG arc implementation algorithm
+        var dx = (start.X - end.X) / 2;
+        var dy = (start.Y - end.Y) / 2;
+
+        var rotationAngle = arc.RotationAngle * Math.PI / 180;
+        var cosAngle = Math.Cos(rotationAngle);
+        var sinAngle = Math.Sin(rotationAngle);
+
+        var x1p = cosAngle * dx + sinAngle * dy;
+        var y1p = -sinAngle * dx + cosAngle * dy;
+
+        // Ensure radii are large enough
+        var x1pSq = x1p * x1p;
+        var y1pSq = y1p * y1p;
+        var rxSq = rx * rx;
+        var rySq = ry * ry;
+
+        var lambda = x1pSq / rxSq + y1pSq / rySq;
+        if (lambda > 1)
+        {
+            var sqrtLambda = Math.Sqrt(lambda);
+            rx *= sqrtLambda;
+            ry *= sqrtLambda;
+            rxSq = rx * rx;
+            rySq = ry * ry;
+        }
+
+        // Calculate center point
+        // Per SVG spec: sign is positive when fA != fS
+        var sign = (arc.IsLargeArc != (arc.SweepDirection == SweepDirection.Clockwise)) ? 1 : -1;
+        var sq = Math.Max(0, (rxSq * rySq - rxSq * y1pSq - rySq * x1pSq) / (rxSq * y1pSq + rySq * x1pSq));
+        var coef = sign * Math.Sqrt(sq);
+
+        var cxp = coef * rx * y1p / ry;
+        var cyp = -coef * ry * x1p / rx;
+
+        var cx = cosAngle * cxp - sinAngle * cyp + (start.X + end.X) / 2;
+        var cy = sinAngle * cxp + cosAngle * cyp + (start.Y + end.Y) / 2;
+
+        // Calculate start and end angles
+        var startAngle = Math.Atan2((y1p - cyp) / ry, (x1p - cxp) / rx);
+        var endAngle = Math.Atan2((-y1p - cyp) / ry, (-x1p - cxp) / rx);
+
+        var deltaAngle = endAngle - startAngle;
+
+        // Adjust delta angle based on sweep direction
+        if (arc.SweepDirection == SweepDirection.Clockwise && deltaAngle < 0)
+            deltaAngle += 2 * Math.PI;
+        else if (arc.SweepDirection == SweepDirection.Counterclockwise && deltaAngle > 0)
+            deltaAngle -= 2 * Math.PI;
+
+        // Generate arc points
+        const int segments = 8;
+        for (int i = 1; i <= segments; i++)
+        {
+            var t = i / (double)segments;
+            var angle = startAngle + deltaAngle * t;
+
+            var px = rx * Math.Cos(angle);
+            var py = ry * Math.Sin(angle);
+
+            var x = cosAngle * px - sinAngle * py + cx;
+            var y = sinAngle * px + cosAngle * py + cy;
+
+            points.Add(new Point(x, y));
+        }
+
         return points;
     }
 

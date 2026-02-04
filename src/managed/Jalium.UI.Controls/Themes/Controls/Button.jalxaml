@@ -106,25 +106,26 @@
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="Template">
             <ControlTemplate TargetType="HyperlinkButton">
-                <Border Background="{TemplateBinding Background}"
+                <Border Name="RootBorder"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
                         Padding="{TemplateBinding Padding}">
-                    <StackPanel Orientation="Vertical">
-                        <ContentPresenter Name="ContentElement"
-                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    <Grid>
+                        <ContentPresenter
+                            HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        <!-- Underline border at the bottom -->
                         <Border Name="UnderlineBorder"
+                                VerticalAlignment="Bottom"
                                 Height="1"
-                                Background="{TemplateBinding Foreground}"
-                                Margin="0,-1,0,0" />
-                    </StackPanel>
+                                Background="{TemplateBinding Foreground}" />
+                    </Grid>
                 </Border>
             </ControlTemplate>
         </Setter>
 
         <Style.Triggers>
-            <PropertyTrigger Property="IsUnderlined" Value="False">
-                <Setter TargetName="UnderlineBorder" Property="Visibility" Value="Collapsed" />
-            </PropertyTrigger>
             <PropertyTrigger Property="IsMouseOver" Value="True">
                 <Setter Property="Foreground" Value="{StaticResource HyperlinkForegroundHover}" />
             </PropertyTrigger>
@@ -133,6 +134,9 @@
             </PropertyTrigger>
             <PropertyTrigger Property="IsEnabled" Value="False">
                 <Setter Property="Foreground" Value="{StaticResource TextDisabled}" />
+            </PropertyTrigger>
+            <PropertyTrigger Property="IsUnderlined" Value="False">
+                <Setter TargetName="UnderlineBorder" Property="Visibility" Value="Collapsed" />
             </PropertyTrigger>
         </Style.Triggers>
     </Style>

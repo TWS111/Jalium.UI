@@ -695,6 +695,14 @@ public class TextBox : TextBoxBase, IImeSupport
     /// <inheritdoc />
     protected override Size MeasureOverride(Size availableSize)
     {
+        // If using template, delegate to base class which handles template root
+        // The TextBoxContentHost will call MeasureTextContent for the text area
+        if (Template != null)
+        {
+            return base.MeasureOverride(availableSize);
+        }
+
+        // Direct rendering mode - calculate size based on content
         var padding = Padding;
         var border = BorderThickness;
         // Round line height for consistent layout
@@ -726,6 +734,26 @@ public class TextBox : TextBoxBase, IImeSupport
             Math.Min(desiredHeight, availableSize.Height));
     }
 
+    /// <inheritdoc />
+    internal override Size MeasureTextContent(Size availableSize)
+    {
+        EnsureLinesValid();
+
+        var lineHeight = Math.Round(GetLineHeight());
+
+        double textHeight;
+        if (AcceptsReturn)
+        {
+            textHeight = Math.Max(1, _lines.Count) * lineHeight;
+        }
+        else
+        {
+            textHeight = lineHeight;
+        }
+
+        return new Size(availableSize.Width, Math.Min(textHeight, availableSize.Height));
+    }
+
     #endregion
 
     #region Rendering
@@ -735,53 +763,71 @@ public class TextBox : TextBoxBase, IImeSupport
     {
         base.OnRender(drawingContext);
 
+        // If using content host, text rendering is handled by TextBoxContentHost
+        if (HasContentHost)
+            return;
+
+        // Direct rendering mode
         if (drawingContext is not DrawingContext dc)
             return;
 
         var border = BorderThickness;
         var padding = Padding;
         var bounds = new Rect(0, 0, RenderSize.Width, RenderSize.Height);
-        // Round line height to prevent sub-pixel jittering from floating-point accumulation
         var lineHeight = Math.Round(GetLineHeight());
 
         EnsureLinesValid();
 
-        // Draw background
+        // Draw background and border (no template = direct rendering)
+        var cornerRadius = CornerRadius;
         if (Background != null)
         {
-            var cornerRadius = CornerRadius;
-            if (cornerRadius.TopLeft > 0)
-            {
-                dc.DrawRoundedRectangle(Background, null, bounds, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(Background, null, bounds);
-            }
+            dc.DrawRoundedRectangle(Background, null, bounds, cornerRadius);
         }
 
-        // Draw border
         if (BorderBrush != null && border.Left > 0)
         {
             var borderPen = new Pen(BorderBrush, border.Left);
-            var cornerRadius = CornerRadius;
-            if (cornerRadius.TopLeft > 0)
-            {
-                dc.DrawRoundedRectangle(null, borderPen, bounds, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(null, borderPen, bounds);
-            }
+            dc.DrawRoundedRectangle(null, borderPen, bounds, cornerRadius);
         }
 
-        // Content area - round to pixel boundaries to prevent sub-pixel jittering
+        // Content area
         var contentRect = new Rect(
             Math.Round(border.Left + padding.Left),
             Math.Round(border.Top + padding.Top),
             Math.Max(0, Math.Round(bounds.Width - border.Left - border.Right - padding.Left - padding.Right)),
             Math.Max(0, Math.Round(bounds.Height - border.Top - border.Bottom - padding.Top - padding.Bottom)));
 
+        // Render text content
+        RenderTextContentCore(dc, contentRect, lineHeight);
+
+        // Draw focus indicator
+        if (IsKeyboardFocused)
+        {
+            var focusPen = new Pen(new SolidColorBrush(Color.FromRgb(0, 120, 212)), 1);
+            dc.DrawRoundedRectangle(null, focusPen, bounds, cornerRadius);
+        }
+    }
+
+    /// <inheritdoc />
+    internal override void RenderTextContent(object drawingContext)
+    {
+        if (drawingContext is not DrawingContext dc)
+            return;
+
+        EnsureLinesValid();
+
+        var lineHeight = Math.Round(GetLineHeight());
+        var contentRect = new Rect(0, 0, _textContentSize.Width, _textContentSize.Height);
+
+        RenderTextContentCore(dc, contentRect, lineHeight);
+    }
+
+    /// <summary>
+    /// Core text rendering logic used by both direct rendering and content host modes.
+    /// </summary>
+    private void RenderTextContentCore(DrawingContext dc, Rect contentRect, double lineHeight)
+    {
         // Clip to content area
         dc.PushClip(new RectangleGeometry(contentRect));
 
@@ -793,16 +839,14 @@ public class TextBox : TextBoxBase, IImeSupport
             DrawSelection(dc, contentRect, lineHeight);
         }
 
-        // Round scroll offsets for consistent rendering
-        var roundedHorizontalOffset = Math.Round(_horizontalOffset);
-        var roundedVerticalOffset = Math.Round(_verticalOffset);
-
         // Draw text or placeholder
         if (string.IsNullOrEmpty(text))
         {
             if (!string.IsNullOrEmpty(Placeholder))
             {
                 var placeholderBrush = new SolidColorBrush(Color.FromRgb(128, 128, 128));
+                var roundedHorizontalOffset = Math.Round(_horizontalOffset);
+                var roundedVerticalOffset = Math.Round(_verticalOffset);
                 var formattedPlaceholder = new FormattedText(Placeholder, FontFamily ?? "Segoe UI", FontSize)
                 {
                     Foreground = placeholderBrush,
@@ -829,28 +873,13 @@ public class TextBox : TextBoxBase, IImeSupport
             DrawImeComposition(dc, contentRect, lineHeight);
         }
 
-        // Draw caret - always call DrawCaret when focused to keep animation running
-        // DrawCaret will internally check opacity and skip drawing when hidden
+        // Draw caret
         if (IsFocused && !IsReadOnly)
         {
             DrawCaret(dc, contentRect, lineHeight);
         }
 
         dc.Pop(); // Pop clip
-
-        // Draw focus indicator
-        if (IsKeyboardFocused)
-        {
-            var focusPen = new Pen(new SolidColorBrush(Color.FromRgb(0, 120, 212)), 1);
-            if (CornerRadius.TopLeft > 0)
-            {
-                dc.DrawRoundedRectangle(null, focusPen, bounds, CornerRadius.TopLeft, CornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(null, focusPen, bounds);
-            }
-        }
     }
 
     private void DrawText(DrawingContext dc, Rect contentRect, double lineHeight)

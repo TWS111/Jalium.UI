@@ -261,45 +261,23 @@ public class ContextMenu : ItemsControl
 
         var rect = new Rect(RenderSize);
         var cornerRadius = CornerRadius;
-        var hasCornerRadius = cornerRadius.TopLeft > 0;
 
         // Draw shadow (simplified)
         var shadowRect = new Rect(rect.X + 2, rect.Y + 2, rect.Width, rect.Height);
         var shadowBrush = new SolidColorBrush(Color.FromArgb(64, 0, 0, 0));
-        if (hasCornerRadius)
-        {
-            dc.DrawRoundedRectangle(shadowBrush, null, shadowRect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-        }
-        else
-        {
-            dc.DrawRectangle(shadowBrush, null, shadowRect);
-        }
+        dc.DrawRoundedRectangle(shadowBrush, null, shadowRect, cornerRadius);
 
         // Draw background
         if (Background != null)
         {
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(Background, null, rect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(Background, null, rect);
-            }
+            dc.DrawRoundedRectangle(Background, null, rect, cornerRadius);
         }
 
         // Draw border
         if (BorderBrush != null && BorderThickness.TotalWidth > 0)
         {
             var pen = new Pen(BorderBrush, BorderThickness.Left);
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(null, pen, rect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(null, pen, rect);
-            }
+            dc.DrawRoundedRectangle(null, pen, rect, cornerRadius);
         }
     }
 

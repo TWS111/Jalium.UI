@@ -138,9 +138,22 @@ public class TitleBarButton : ButtonBase
     protected override Size MeasureOverride(Size availableSize)
     {
         // Title bar buttons have fixed size
-        return new Size(
+        var desiredSize = new Size(
             double.IsInfinity(availableSize.Width) ? Width : Math.Min(Width, availableSize.Width),
             double.IsInfinity(availableSize.Height) ? Height : Math.Min(Height, availableSize.Height));
+
+        // IMPORTANT: Still need to measure template content so children get proper RenderSize
+        // Call base to apply template and measure template root
+        base.MeasureOverride(desiredSize);
+
+        return desiredSize;
+    }
+
+    /// <inheritdoc />
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        // Let base class arrange the template content
+        return base.ArrangeOverride(finalSize);
     }
 
     #endregion

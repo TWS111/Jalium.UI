@@ -26,12 +26,14 @@
             <ControlTemplate TargetType="TitleBarButton">
                 <Border Name="PART_RootBorder"
                         Background="{TemplateBinding Background}">
-                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Grid Width="10" Height="10" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <!-- Minimize Glyph (horizontal line) -->
                         <Path Name="MinimizeGlyph"
-                              Data="M 0,5 L 10,5"
+                              Data="M 0,0 L 10,0"
                               Stroke="{TemplateBinding Foreground}"
                               StrokeThickness="1"
+                              Stretch="None"
+                              VerticalAlignment="Center"
                               Visibility="Collapsed" />
 
                         <!-- Maximize Glyph (square) -->
@@ -39,20 +41,21 @@
                               Data="M 0,0 L 10,0 L 10,10 L 0,10 Z"
                               Stroke="{TemplateBinding Foreground}"
                               StrokeThickness="1"
-                              Fill="Transparent"
+                              Stretch="None"
                               Visibility="Collapsed" />
 
                         <!-- Restore Glyph (two overlapping squares) -->
-                        <Grid Name="RestoreGlyph" Visibility="Collapsed">
+                        <Grid Name="RestoreGlyph" Width="10" Height="10" Visibility="Collapsed">
                             <!-- Back square (top-right) -->
                             <Path Data="M 2,0 L 10,0 L 10,8 L 8,8 L 8,2 L 2,2 Z"
                                   Stroke="{TemplateBinding Foreground}"
                                   StrokeThickness="1"
-                                  Fill="Transparent" />
+                                  Stretch="None" />
                             <!-- Front square (bottom-left) -->
                             <Path Data="M 0,2 L 8,2 L 8,10 L 0,10 Z"
                                   Stroke="{TemplateBinding Foreground}"
                                   StrokeThickness="1"
+                                  Stretch="None"
                                   Fill="{TemplateBinding Background}" />
                         </Grid>
 
@@ -61,6 +64,7 @@
                               Data="M 0,0 L 10,10 M 10,0 L 0,10"
                               Stroke="{TemplateBinding Foreground}"
                               StrokeThickness="1"
+                              Stretch="None"
                               Visibility="Visible" />
                     </Grid>
                 </Border>
@@ -124,9 +128,10 @@
                         <Setter TargetName="PART_RootBorder" Property="Background" Value="{StaticResource TitleBarCloseButtonHover}" />
                     </MultiTrigger>
 
-                    <!-- Pressed state for non-close buttons -->
+                    <!-- Pressed state for non-close buttons (requires mouse over to allow cancel by dragging outside) -->
                     <MultiTrigger>
                         <MultiTrigger.Conditions>
+                            <Condition Property="IsMouseOver" Value="True" />
                             <Condition Property="IsPressed" Value="True" />
                             <Condition Property="Kind" Value="Minimize" />
                         </MultiTrigger.Conditions>
@@ -134,6 +139,7 @@
                     </MultiTrigger>
                     <MultiTrigger>
                         <MultiTrigger.Conditions>
+                            <Condition Property="IsMouseOver" Value="True" />
                             <Condition Property="IsPressed" Value="True" />
                             <Condition Property="Kind" Value="Maximize" />
                         </MultiTrigger.Conditions>
@@ -141,15 +147,17 @@
                     </MultiTrigger>
                     <MultiTrigger>
                         <MultiTrigger.Conditions>
+                            <Condition Property="IsMouseOver" Value="True" />
                             <Condition Property="IsPressed" Value="True" />
                             <Condition Property="Kind" Value="Restore" />
                         </MultiTrigger.Conditions>
                         <Setter TargetName="PART_RootBorder" Property="Background" Value="{StaticResource TitleBarButtonPressed}" />
                     </MultiTrigger>
 
-                    <!-- Pressed state for close button -->
+                    <!-- Pressed state for close button (requires mouse over to allow cancel by dragging outside) -->
                     <MultiTrigger>
                         <MultiTrigger.Conditions>
+                            <Condition Property="IsMouseOver" Value="True" />
                             <Condition Property="IsPressed" Value="True" />
                             <Condition Property="Kind" Value="Close" />
                         </MultiTrigger.Conditions>

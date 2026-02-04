@@ -3,6 +3,8 @@ using Jalium.UI.Input;
 using Jalium.UI.Interop;
 using Jalium.UI.Media;
 
+using static Jalium.UI.Cursors;
+
 namespace Jalium.UI.Controls;
 
 /// <summary>
@@ -74,7 +76,7 @@ public class HyperlinkButton : ButtonBase
         Background = null;
         Padding = new Thickness(0);
         BorderThickness = new Thickness(0);
-        // Note: Cursor support will be added when the base class supports it
+        Cursor = Hand; // Hand cursor for clickable hyperlinks
     }
 
     #endregion
@@ -140,6 +142,13 @@ public class HyperlinkButton : ButtonBase
     /// <inheritdoc />
     protected override Size MeasureOverride(Size availableSize)
     {
+        // If using template, delegate to base class which handles template root
+        if (Template != null)
+        {
+            return base.MeasureOverride(availableSize);
+        }
+
+        // Direct rendering fallback when no template
         var padding = Padding;
 
         if (Content is string text)
@@ -164,6 +173,19 @@ public class HyperlinkButton : ButtonBase
         return new Size(padding.TotalWidth, padding.TotalHeight);
     }
 
+    /// <inheritdoc />
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        // If using template, delegate to base class
+        if (Template != null)
+        {
+            return base.ArrangeOverride(finalSize);
+        }
+
+        // Direct rendering fallback
+        return base.ArrangeOverride(finalSize);
+    }
+
     #endregion
 
     #region Rendering
@@ -172,7 +194,7 @@ public class HyperlinkButton : ButtonBase
     protected override void OnRender(object drawingContext)
     {
         // If using template, let the template handle rendering
-        if (_underlineBorder != null)
+        if (Template != null)
         {
             return;
         }

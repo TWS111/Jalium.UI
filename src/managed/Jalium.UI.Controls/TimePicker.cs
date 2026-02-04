@@ -298,14 +298,7 @@ public class TimePicker : Control
         // Draw background
         if (Background != null)
         {
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(Background, null, inputRect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(Background, null, inputRect);
-            }
+            dc.DrawRoundedRectangle(Background, null, inputRect, cornerRadius);
         }
 
         // Draw border
@@ -313,14 +306,7 @@ public class TimePicker : Control
         if (borderBrush != null && BorderThickness.TotalWidth > 0)
         {
             var pen = new Pen(borderBrush, BorderThickness.Left);
-            if (hasCornerRadius)
-            {
-                dc.DrawRoundedRectangle(null, pen, inputRect, cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(null, pen, inputRect);
-            }
+            dc.DrawRoundedRectangle(null, pen, inputRect, cornerRadius);
         }
 
         // Draw time text or placeholder

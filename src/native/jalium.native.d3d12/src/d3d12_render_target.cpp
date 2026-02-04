@@ -97,7 +97,10 @@ bool D3D12RenderTarget::CreateSwapChain() {
     swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.BufferCount = FrameCount;
     swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
+    // Use DXGI_SCALING_NONE to prevent DWM from stretching old frames during window resize,
+    // which causes visible jitter/trembling. With NONE, the swap chain content is displayed
+    // at its native size and DWM fills any unrendered areas with the background color.
+    swapChainDesc.Scaling = DXGI_SCALING_NONE;
     // Note: DXGI_ALPHA_MODE_PREMULTIPLIED is not supported for CreateSwapChainForHwnd
     // DWM backdrop effects work by treating black (0,0,0) as transparent in the extended frame area
     swapChainDesc.Flags = tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
@@ -569,7 +572,21 @@ void D3D12RenderTarget::DrawLine(float x1, float y1, float x2, float y2, Brush* 
 
     auto d2dBrush = GetD2DBrush(brush);
     if (d2dBrush) {
-        // Coordinates are pre-rounded in managed code
+        // For crisp 1px lines, offset by 0.5 to align to pixel grid
+        // This prevents anti-aliasing from making horizontal/vertical lines appear thicker
+        if (strokeWidth == 1.0f) {
+            // Horizontal line: offset Y by 0.5
+            if (y1 == y2) {
+                y1 += 0.5f;
+                y2 += 0.5f;
+            }
+            // Vertical line: offset X by 0.5
+            else if (x1 == x2) {
+                x1 += 0.5f;
+                x2 += 0.5f;
+            }
+            // Diagonal lines don't need offset
+        }
         d2dContext_->DrawLine(D2D1::Point2F(x1, y1), D2D1::Point2F(x2, y2), d2dBrush, strokeWidth);
     }
 }

@@ -185,57 +185,55 @@ public class Border : FrameworkElement
         var rect = new Rect(RenderSize);
         var border = BorderThickness;
         var cornerRadius = CornerRadius;
+        var borderWidth = Math.Max(border.Left, Math.Max(border.Top, Math.Max(border.Right, border.Bottom)));
+        var halfBorder = borderWidth / 2;
 
         // Draw backdrop effect (if any)
         var backdropEffect = BackdropEffect;
         if (backdropEffect != null && backdropEffect.HasEffect)
         {
-            var effectRect = new Rect(0, 0, rect.Width, rect.Height);
-            dc.DrawBackdropEffect(effectRect, backdropEffect, cornerRadius);
+            dc.DrawBackdropEffect(rect, backdropEffect, cornerRadius);
         }
 
-        // Draw background
+        // Draw background - fill the entire area inside the border
         if (Background != null)
         {
+            // Background fills the area inside the border stroke
             var backgroundRect = new Rect(
-                border.Left / 2,
-                border.Top / 2,
-                Math.Max(0, rect.Width - (border.Left + border.Right) / 2),
-                Math.Max(0, rect.Height - (border.Top + border.Bottom) / 2));
+                halfBorder,
+                halfBorder,
+                Math.Max(0, rect.Width - borderWidth),
+                Math.Max(0, rect.Height - borderWidth));
 
-            if (cornerRadius.TopLeft > 0 || cornerRadius.TopRight > 0 ||
-                cornerRadius.BottomLeft > 0 || cornerRadius.BottomRight > 0)
-            {
-                dc.DrawRoundedRectangle(Background, null, backgroundRect,
-                    cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(Background, null, backgroundRect);
-            }
+            // Adjust corner radius for inner background
+            var innerRadius = new CornerRadius(
+                Math.Max(0, cornerRadius.TopLeft - halfBorder),
+                Math.Max(0, cornerRadius.TopRight - halfBorder),
+                Math.Max(0, cornerRadius.BottomRight - halfBorder),
+                Math.Max(0, cornerRadius.BottomLeft - halfBorder));
+
+            dc.DrawRoundedRectangle(Background, null, backgroundRect, innerRadius);
         }
 
-        // Draw border
-        if (BorderBrush != null && (border.Left > 0 || border.Top > 0 || border.Right > 0 || border.Bottom > 0))
+        // Draw border - stroke is centered on the edge
+        if (BorderBrush != null && borderWidth > 0)
         {
-            var pen = new Pen(BorderBrush, Math.Max(border.Left, Math.Max(border.Top, Math.Max(border.Right, border.Bottom))));
+            var pen = new Pen(BorderBrush, borderWidth);
 
             var borderRect = new Rect(
-                border.Left / 2,
-                border.Top / 2,
-                Math.Max(0, rect.Width - border.Left / 2 - border.Right / 2),
-                Math.Max(0, rect.Height - border.Top / 2 - border.Bottom / 2));
+                halfBorder,
+                halfBorder,
+                Math.Max(0, rect.Width - borderWidth),
+                Math.Max(0, rect.Height - borderWidth));
 
-            if (cornerRadius.TopLeft > 0 || cornerRadius.TopRight > 0 ||
-                cornerRadius.BottomLeft > 0 || cornerRadius.BottomRight > 0)
-            {
-                dc.DrawRoundedRectangle(null, pen, borderRect,
-                    cornerRadius.TopLeft, cornerRadius.TopLeft);
-            }
-            else
-            {
-                dc.DrawRectangle(null, pen, borderRect);
-            }
+            // Adjust corner radius for border stroke position
+            var strokeRadius = new CornerRadius(
+                Math.Max(0, cornerRadius.TopLeft - halfBorder),
+                Math.Max(0, cornerRadius.TopRight - halfBorder),
+                Math.Max(0, cornerRadius.BottomRight - halfBorder),
+                Math.Max(0, cornerRadius.BottomLeft - halfBorder));
+
+            dc.DrawRoundedRectangle(null, pen, borderRect, strokeRadius);
         }
     }
 
