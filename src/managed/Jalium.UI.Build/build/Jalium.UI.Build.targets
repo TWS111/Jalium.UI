@@ -52,8 +52,14 @@
           BeforeTargets="CoreCompile"
           Condition="'$(EnableJalxamlCodeGeneration)' == 'false'">
     <ItemGroup>
+      <_JalxamlSourceGeneratorAnalyzer Include="@(Analyzer)"
+                                       Condition="'%(Filename)' == 'Jalium.UI.Xaml.SourceGenerator'" />
+      <_NonNugetJalxamlSourceGeneratorAnalyzer Include="@(_JalxamlSourceGeneratorAnalyzer)"
+                                               Condition="!$([System.String]::new('%(FullPath)').Contains('.nuget'))" />
       <Analyzer Remove="@(Analyzer)"
-                Condition="'%(Filename)' == 'Jalium.UI.Xaml.SourceGenerator' AND $([System.String]::new('%(FullPath)').Contains('.nuget'))" />
+                Condition="'%(Filename)' == 'Jalium.UI.Xaml.SourceGenerator'
+                           AND $([System.String]::new('%(FullPath)').Contains('.nuget'))
+                           AND '@(_NonNugetJalxamlSourceGeneratorAnalyzer)' != ''" />
     </ItemGroup>
   </Target>
 
@@ -83,7 +89,7 @@
           BeforeTargets="CoreCompile"
           DependsOnTargets="PrepareForBuild"
           Inputs="@(JalxamlPage);@(JalxamlApplicationDefinition)"
-          Outputs="$(JalxamlIntermediateOutputPath)%(Filename).g.cs"
+          Outputs="@(JalxamlPage->'$(JalxamlIntermediateOutputPath)%(Filename).g.cs');@(JalxamlApplicationDefinition->'$(JalxamlIntermediateOutputPath)%(Filename).g.cs')"
           Condition="'$(EnableJalxamlCodeGeneration)' == 'true' And ('@(JalxamlPage)' != '' Or '@(JalxamlApplicationDefinition)' != '')">
 
     <MakeDir Directories="$(JalxamlIntermediateOutputPath)" />
@@ -104,6 +110,23 @@
     </ItemGroup>
 
     <Message Text="宸茬敓鎴?JALXAML 浠ｇ爜闅愯棌: @(_JalxamlGeneratedFiles)" Importance="normal" />
+  </Target>
+
+  <!--
+    Always register expected generated code-behind files into Compile/FileWrites before CoreCompile.
+    This must run even when GenerateJalxamlCodeBehind is skipped by incremental build.
+  -->
+  <Target Name="IncludeJalxamlGeneratedCodeBehind"
+          BeforeTargets="CoreCompile"
+          DependsOnTargets="GenerateJalxamlCodeBehind"
+          Condition="'$(EnableJalxamlCodeGeneration)' == 'true' And ('@(JalxamlPage)' != '' Or '@(JalxamlApplicationDefinition)' != '')">
+    <ItemGroup>
+      <_ExpectedJalxamlGeneratedFiles Include="@(JalxamlPage->'$(JalxamlIntermediateOutputPath)%(Filename).g.cs')" />
+      <_ExpectedJalxamlGeneratedFiles Include="@(JalxamlApplicationDefinition->'$(JalxamlIntermediateOutputPath)%(Filename).g.cs')" />
+      <Compile Remove="@(_ExpectedJalxamlGeneratedFiles)" />
+      <Compile Include="@(_ExpectedJalxamlGeneratedFiles)" Condition="Exists('%(Identity)')" />
+      <FileWrites Include="@(_ExpectedJalxamlGeneratedFiles)" Condition="Exists('%(Identity)')" />
+    </ItemGroup>
   </Target>
 
   <!--

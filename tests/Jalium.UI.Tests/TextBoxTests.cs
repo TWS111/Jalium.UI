@@ -1,5 +1,6 @@
 using Jalium.UI;
 using Jalium.UI.Controls;
+using Jalium.UI.Media;
 
 namespace Jalium.UI.Tests;
 
@@ -18,6 +19,7 @@ public class TextBoxTests
         Assert.Equal(string.Empty, textBox.Text);
         Assert.Equal(0, textBox.MaxLength);
         Assert.Equal(TextWrapping.NoWrap, textBox.TextWrapping);
+        Assert.Equal(TextTrimming.CharacterEllipsis, textBox.TextTrimming);
         Assert.Equal(TextAlignment.Left, textBox.TextAlignment);
         Assert.Equal(string.Empty, textBox.Placeholder);
         Assert.False(textBox.IsSpellCheckEnabled);

@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Jalium.UI.Controls" />
     <InternalsVisibleTo Include="Jalium.UI.Tests" />
   </ItemGroup>
 
@@ -21,11 +22,15 @@
   <ItemGroup Condition="'$(Configuration)' == 'Debug'">
     <Content Include="..\..\native\bin\native\Debug\jalium.native.core.dll" Link="jalium.native.core.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Pack="true" PackagePath="runtimes/win-x64/native" />
     <Content Include="..\..\native\bin\native\Debug\jalium.native.d3d12.dll" Link="jalium.native.d3d12.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Pack="true" PackagePath="runtimes/win-x64/native" />
+    <Content Include="..\..\native\bin\native\Debug\jalium.native.browser.dll" Link="jalium.native.browser.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Pack="true" PackagePath="runtimes/win-x64/native" />
+    <Content Include="..\..\native\jalium.native.browser\redist\WebView2Loader.dll" Link="WebView2Loader.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Pack="true" PackagePath="runtimes/win-x64/native" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(Configuration)' == 'Release'">
     <Content Include="..\..\native\bin\native\Release\jalium.native.core.dll" Link="jalium.native.core.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Pack="true" PackagePath="runtimes/win-x64/native" />
     <Content Include="..\..\native\bin\native\Release\jalium.native.d3d12.dll" Link="jalium.native.d3d12.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Pack="true" PackagePath="runtimes/win-x64/native" />
+    <Content Include="..\..\native\bin\native\Release\jalium.native.browser.dll" Link="jalium.native.browser.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Pack="true" PackagePath="runtimes/win-x64/native" />
+    <Content Include="..\..\native\jalium.native.browser\redist\WebView2Loader.dll" Link="WebView2Loader.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Pack="true" PackagePath="runtimes/win-x64/native" />
   </ItemGroup>
 
   <!-- Ensure native DLLs are copied to output on package restore -->

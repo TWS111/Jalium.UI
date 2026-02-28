@@ -857,7 +857,8 @@ public class TextBox : TextBoxBase, IImeSupport
                 {
                     Foreground = placeholderBrush,
                     MaxTextWidth = contentRect.Width,
-                    MaxTextHeight = contentRect.Height
+                    MaxTextHeight = contentRect.Height,
+                    Trimming = TextTrimming
                 };
                 dc.DrawText(formattedPlaceholder, new Point(contentRect.X - roundedHorizontalOffset, contentRect.Y - roundedVerticalOffset));
             }
@@ -914,7 +915,8 @@ public class TextBox : TextBoxBase, IImeSupport
             {
                 Foreground = textBrush,
                 MaxTextWidth = Math.Max(0, contentRect.Width + roundedHorizontalOffset),
-                MaxTextHeight = lineHeight
+                MaxTextHeight = lineHeight,
+                Trimming = TextTrimming
             };
 
             var x = contentRect.X - roundedHorizontalOffset;

@@ -34,6 +34,9 @@ public enum TitleBarButtonKind
 /// </summary>
 public sealed class TitleBarButton : ButtonBase
 {
+    private const double DefaultButtonWidth = 46;
+    private const double DefaultButtonHeight = 32;
+
     #region Dependency Properties
 
     /// <summary>
@@ -82,8 +85,6 @@ public sealed class TitleBarButton : ButtonBase
     public TitleBarButton()
     {
         Focusable = false;
-        Width = 46;
-        Height = 32;
     }
 
     #endregion
@@ -138,10 +139,20 @@ public sealed class TitleBarButton : ButtonBase
     /// <inheritdoc />
     protected override Size MeasureOverride(Size availableSize)
     {
-        // Title bar buttons have fixed size
-        var desiredSize = new Size(
-            double.IsInfinity(availableSize.Width) ? Width : Math.Min(Width, availableSize.Width),
-            double.IsInfinity(availableSize.Height) ? Height : Math.Min(Height, availableSize.Height));
+        // Respect styled Width/Height first; fall back to native caption button defaults.
+        double width = !double.IsNaN(Width) && Width > 0 ? Width : DefaultButtonWidth;
+        double height = !double.IsNaN(Height) && Height > 0 ? Height : DefaultButtonHeight;
+        if (!double.IsInfinity(availableSize.Width))
+        {
+            width = Math.Min(width, Math.Max(0, availableSize.Width));
+        }
+
+        if (!double.IsInfinity(availableSize.Height))
+        {
+            height = Math.Min(height, Math.Max(0, availableSize.Height));
+        }
+
+        var desiredSize = new Size(width, height);
 
         // IMPORTANT: Still need to measure template content so children get proper RenderSize
         // Call base to apply template and measure template root

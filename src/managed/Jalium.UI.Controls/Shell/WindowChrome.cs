@@ -1,4 +1,4 @@
-using Jalium.UI.Media;
+﻿using Jalium.UI.Media;
 
 namespace Jalium.UI.Controls.Shell;
 
@@ -393,3 +393,4 @@ public enum ResizeGripDirection
     /// </summary>
     Caption
 }
+

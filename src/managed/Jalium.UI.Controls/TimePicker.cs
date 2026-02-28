@@ -30,8 +30,8 @@ public sealed class TimePicker : Control
         DependencyProperty.Register(nameof(Header), typeof(object), typeof(TimePicker),
             new PropertyMetadata(null, OnLayoutPropertyChanged));
 
-    public static readonly DependencyProperty PlaceholderTextProperty =
-        DependencyProperty.Register(nameof(PlaceholderText), typeof(string), typeof(TimePicker),
+    public static readonly DependencyProperty PlaceholderProperty =
+        DependencyProperty.Register(nameof(Placeholder), typeof(string), typeof(TimePicker),
             new PropertyMetadata("Select a time", OnVisualPropertyChanged));
 
     public static readonly DependencyProperty IsDropDownOpenProperty =
@@ -80,10 +80,10 @@ public sealed class TimePicker : Control
         set => SetValue(HeaderProperty, value);
     }
 
-    public string? PlaceholderText
+    public string? Placeholder
     {
-        get => (string?)GetValue(PlaceholderTextProperty);
-        set => SetValue(PlaceholderTextProperty, value);
+        get => (string?)GetValue(PlaceholderProperty);
+        set => SetValue(PlaceholderProperty, value);
     }
 
     public bool IsDropDownOpen
@@ -702,7 +702,7 @@ public sealed class TimePicker : Control
         }
         else
         {
-            displayText = PlaceholderText ?? "Select a time";
+            displayText = Placeholder ?? "Select a time";
             textBrush = s_placeholderBrush;
         }
 

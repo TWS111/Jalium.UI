@@ -11,6 +11,60 @@
         <Setter Property="FontSize" Value="12" />
         <Setter Property="FontFamily" Value="Segoe UI" />
         <Setter Property="Height" Value="32" />
+        <Setter Property="Template">
+            <ControlTemplate TargetType="TitleBar">
+                <Border Name="PART_RootBorder"
+                        Background="{TemplateBinding Background}"
+                        BackdropEffect="{TemplateBinding BackdropEffect}"
+                        CornerRadius="{TemplateBinding CornerRadius}">
+                    <DockPanel LastChildFill="True">
+                        <TitleBarButton Name="PART_CloseButton"
+                                        Kind="Close"
+                                        DockPanel.Dock="Right" />
+                        <TitleBarButton Name="PART_MaximizeButton"
+                                        Kind="Maximize"
+                                        DockPanel.Dock="Right" />
+                        <TitleBarButton Name="PART_MinimizeButton"
+                                        Kind="Minimize"
+                                        DockPanel.Dock="Right" />
+                        <ContentPresenter Name="PART_RightWindowCommandsHost"
+                                          DockPanel.Dock="Right"
+                                          Content="{TemplateBinding RightWindowCommands}"
+                                          Margin="0,0,8,0"
+                                          VerticalAlignment="Center"
+                                          Visibility="Collapsed" />
+                        <DockPanel LastChildFill="False"
+                                   Margin="10,0,8,0">
+                            <Border Name="PART_WindowIconHost"
+                                    DockPanel.Dock="Left"
+                                    Width="16"
+                                    Height="16"
+                                    Margin="0,0,8,0"
+                                    VerticalAlignment="Center"
+                                    Visibility="Collapsed">
+                                <Image Source="{TemplateBinding WindowIcon}"
+                                       Stretch="Uniform" />
+                            </Border>
+                            <TextBlock Name="PART_TitleText"
+                                       DockPanel.Dock="Left"
+                                       Margin="0,0,12,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       FontFamily="{TemplateBinding FontFamily}"
+                                       FontSize="{TemplateBinding FontSize}"
+                                       Text="{TemplateBinding Title}"
+                                       TextTrimming="CharacterEllipsis" />
+                            <ContentPresenter Name="PART_LeftWindowCommandsHost"
+                                              DockPanel.Dock="Left"
+                                              Content="{TemplateBinding LeftWindowCommands}"
+                                              Margin="8,0,0,0"
+                                              VerticalAlignment="Center"
+                                              Visibility="Collapsed" />
+                        </DockPanel>
+                    </DockPanel>
+                </Border>
+            </ControlTemplate>
+        </Setter>
     </Style>
 
     <!-- ============================================== -->

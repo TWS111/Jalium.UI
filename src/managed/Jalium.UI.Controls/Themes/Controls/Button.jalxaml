@@ -28,7 +28,18 @@
                         Padding="{TemplateBinding Padding}">
                     <ContentPresenter
                         HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                        VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        VerticalAlignment="{TemplateBinding VerticalContentAlignment}">
+                        <ContentPresenter.Resources>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                <Setter Property="TextWrapping" Value="NoWrap" />
+                            </Style>
+                            <Style TargetType="AccessText">
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                <Setter Property="TextWrapping" Value="NoWrap" />
+                            </Style>
+                        </ContentPresenter.Resources>
+                    </ContentPresenter>
                 </Border>
             </ControlTemplate>
         </Setter>
@@ -73,7 +84,18 @@
                         Padding="{TemplateBinding Padding}">
                     <ContentPresenter
                         HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                        VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        VerticalAlignment="{TemplateBinding VerticalContentAlignment}">
+                        <ContentPresenter.Resources>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                <Setter Property="TextWrapping" Value="NoWrap" />
+                            </Style>
+                            <Style TargetType="AccessText">
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                <Setter Property="TextWrapping" Value="NoWrap" />
+                            </Style>
+                        </ContentPresenter.Resources>
+                    </ContentPresenter>
                 </Border>
             </ControlTemplate>
         </Setter>

@@ -177,6 +177,19 @@ internal static partial class NativeMethods
     [LibraryImport(CoreLib, EntryPoint = "jalium_render_target_set_full_invalidation")]
     internal static partial void RenderTargetSetFullInvalidation(nint renderTarget);
 
+    /// <summary>
+    /// Creates a composition visual node for hosting external content (e.g. WebView).
+    /// Returns a backend-specific COM pointer (IUnknown* on Windows).
+    /// </summary>
+    [LibraryImport(CoreLib, EntryPoint = "jalium_render_target_create_webview_visual")]
+    internal static partial int RenderTargetCreateWebViewVisual(nint renderTarget, out nint visualTarget);
+
+    /// <summary>
+    /// Destroys a composition visual previously created by RenderTargetCreateWebViewVisual.
+    /// </summary>
+    [LibraryImport(CoreLib, EntryPoint = "jalium_render_target_destroy_webview_visual")]
+    internal static partial int RenderTargetDestroyWebViewVisual(nint renderTarget, nint visualTarget);
+
     #endregion
 
     #region Drawing Commands

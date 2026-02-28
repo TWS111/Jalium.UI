@@ -292,17 +292,8 @@ public class Grid : Panel
             }
         }
 
-        // Store auto sizes (and star-as-auto sizes) in definitions so ArrangeOverride can read them
-        for (int i = 0; i < rowCount; i++)
-        {
-            if (rowDefs[i].Height.IsAuto || (rowStarValues[i] > 0 && double.IsPositiveInfinity(availableRowSpace)))
-                rowDefs[i].ActualHeight = rowHeights[i];
-        }
-        for (int i = 0; i < columnCount; i++)
-        {
-            if (columnDefs[i].Width.IsAuto || (columnStarValues[i] > 0 && double.IsPositiveInfinity(availableColumnSpace)))
-                columnDefs[i].ActualWidth = columnWidths[i];
-        }
+        var treatStarRowsAsAuto = totalRowStars > 0 && double.IsPositiveInfinity(availableRowSpace);
+        var treatStarColumnsAsAuto = totalColumnStars > 0 && double.IsPositiveInfinity(availableColumnSpace);
 
         // Measure all children with their final available sizes
         foreach (var child in Children)
@@ -323,6 +314,42 @@ public class Grid : Panel
                 cellHeight += rowHeights[i];
 
             fe.Measure(new Size(cellWidth, cellHeight));
+
+            // Reconcile auto (and star-as-auto) definitions with final constrained measure.
+            // This is important for wrapped text: final column width can increase required row height.
+            if (rowSpan == 1)
+            {
+                var rowDef = rowDefs[row];
+                if (rowDef.Height.IsAuto || (treatStarRowsAsAuto && rowStarValues[row] > 0))
+                {
+                    rowHeights[row] = Math.Max(
+                        rowHeights[row],
+                        Math.Clamp(fe.DesiredSize.Height, rowDef.MinHeight, rowDef.MaxHeight));
+                }
+            }
+
+            if (columnSpan == 1)
+            {
+                var columnDef = columnDefs[column];
+                if (columnDef.Width.IsAuto || (treatStarColumnsAsAuto && columnStarValues[column] > 0))
+                {
+                    columnWidths[column] = Math.Max(
+                        columnWidths[column],
+                        Math.Clamp(fe.DesiredSize.Width, columnDef.MinWidth, columnDef.MaxWidth));
+                }
+            }
+        }
+
+        // Store auto sizes (and star-as-auto sizes) in definitions so ArrangeOverride can read them
+        for (int i = 0; i < rowCount; i++)
+        {
+            if (rowDefs[i].Height.IsAuto || (treatStarRowsAsAuto && rowStarValues[i] > 0))
+                rowDefs[i].ActualHeight = rowHeights[i];
+        }
+        for (int i = 0; i < columnCount; i++)
+        {
+            if (columnDefs[i].Width.IsAuto || (treatStarColumnsAsAuto && columnStarValues[i] > 0))
+                columnDefs[i].ActualWidth = columnWidths[i];
         }
 
         // Return the total size

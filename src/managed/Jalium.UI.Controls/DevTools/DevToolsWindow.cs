@@ -69,7 +69,7 @@ public sealed class DevToolsWindow : Window
         Background = new SolidColorBrush(Color.FromArgb(255, 32, 32, 32));
 
         // Layout: rootGrid has 2 rows (toolbar, content).
-        // contentGrid has 2 columns (left=search+tree, right=properties).
+        // contentGrid has 3 columns (left=search+tree, middle=splitter, right=properties).
         _mainGrid = new Grid();
         _mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // row 0: toolbar
         _mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // row 1: content
@@ -79,9 +79,10 @@ public sealed class DevToolsWindow : Window
         Grid.SetRow(toolbar, 0);
         _mainGrid.Children.Add(toolbar);
 
-        // ── Content grid (2 columns) ──────────────────────────────────
+        // ── Content grid (3 columns) ──────────────────────────────────
         var contentGrid = new Grid();
         contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.2, GridUnitType.Star) });
         Grid.SetRow(contentGrid, 1);
         _mainGrid.Children.Add(contentGrid);
@@ -116,23 +117,34 @@ public sealed class DevToolsWindow : Window
         Grid.SetRow(treeView, 1);
         leftGrid.Children.Add(treeView);
 
+        var splitter = new GridSplitter
+        {
+            Width = 6,
+            Margin = new Thickness(0, 4, 0, 4),
+            Background = new SolidColorBrush(Color.FromArgb(255, 64, 64, 64)),
+            ResizeDirection = GridResizeDirection.Columns
+        };
+        Grid.SetColumn(splitter, 1);
+        contentGrid.Children.Add(splitter);
         // ── Right column: properties panel ────────────────────────────
         var propertiesPanel = new StackPanel
         {
             Margin = new Thickness(4)
         };
-        // Wrap in a Border (not ScrollViewer) to test if content renders
+        var scrollViewer = new ScrollViewer
+        {
+            Content = propertiesPanel,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+        };
         var rightBorder = new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(255, 40, 40, 40)),
-            Child = propertiesPanel,
+            Child = scrollViewer,
             ClipToBounds = true
         };
-        Grid.SetColumn(rightBorder, 1);
+        Grid.SetColumn(rightBorder, 2);
         contentGrid.Children.Add(rightBorder);
-        // scrollViewer placeholder for InvalidateMeasure calls
-        UIElement scrollViewer = rightBorder;
-
         Content = _mainGrid;
 
         _visualTreeView = treeView;

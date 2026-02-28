@@ -9,5 +9,13 @@
           Link="jalium.native.d3d12.dll"
           CopyToOutputDirectory="PreserveNewest"
           Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\jalium.native.browser.dll"
+          Link="jalium.native.browser.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\WebView2Loader.dll"
+          Link="WebView2Loader.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
   </ItemGroup>
 </Project>

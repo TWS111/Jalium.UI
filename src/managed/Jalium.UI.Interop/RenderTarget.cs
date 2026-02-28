@@ -391,6 +391,42 @@ public sealed class RenderTarget : IDisposable
     }
 
     /// <summary>
+    /// Attempts to create a composition visual node suitable for WebView composition hosting.
+    /// </summary>
+    /// <param name="visualTarget">Returns the native visual pointer (IUnknown* on Windows).</param>
+    /// <returns>True when a visual was created; false when unsupported or unavailable.</returns>
+    public bool TryCreateWebViewCompositionVisual(out nint visualTarget)
+    {
+        ThrowIfDisposed();
+        visualTarget = nint.Zero;
+
+        var resultCode = NativeMethods.RenderTargetCreateWebViewVisual(_handle, out var target);
+        if (resultCode == (int)JaliumResult.Ok && target != nint.Zero)
+        {
+            visualTarget = target;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Destroys a composition visual previously created by <see cref="TryCreateWebViewCompositionVisual"/>.
+    /// </summary>
+    /// <param name="visualTarget">The native visual pointer.</param>
+    public void DestroyWebViewCompositionVisual(nint visualTarget)
+    {
+        ThrowIfDisposed();
+        if (visualTarget == nint.Zero)
+        {
+            return;
+        }
+
+        var resultCode = NativeMethods.RenderTargetDestroyWebViewVisual(_handle, visualTarget);
+        ThrowIfNativeFailure("DestroyWebViewVisual", resultCode);
+    }
+
+    /// <summary>
     /// Draws a bitmap.
     /// </summary>
     /// <param name="bitmap">The bitmap to draw.</param>

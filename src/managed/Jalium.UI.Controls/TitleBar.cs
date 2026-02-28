@@ -1,5 +1,4 @@
 ﻿using Jalium.UI.Input;
-using Jalium.UI.Interop;
 using Jalium.UI.Media;
 
 namespace Jalium.UI.Controls;
@@ -45,6 +44,41 @@ public sealed class TitleBar : Control
     public static readonly DependencyProperty ShowCloseButtonProperty =
         DependencyProperty.Register(nameof(ShowCloseButton), typeof(bool), typeof(TitleBar),
             new PropertyMetadata(true, OnButtonVisibilityChanged));
+
+    /// <summary>
+    /// Identifies the LeftWindowCommands dependency property.
+    /// </summary>
+    public static readonly DependencyProperty LeftWindowCommandsProperty =
+        DependencyProperty.Register(nameof(LeftWindowCommands), typeof(FrameworkElement), typeof(TitleBar),
+            new PropertyMetadata(null, OnPresentationPropertyChanged));
+
+    /// <summary>
+    /// Identifies the RightWindowCommands dependency property.
+    /// </summary>
+    public static readonly DependencyProperty RightWindowCommandsProperty =
+        DependencyProperty.Register(nameof(RightWindowCommands), typeof(FrameworkElement), typeof(TitleBar),
+            new PropertyMetadata(null, OnPresentationPropertyChanged));
+
+    /// <summary>
+    /// Identifies the IsShowIcon dependency property.
+    /// </summary>
+    public static readonly DependencyProperty IsShowIconProperty =
+        DependencyProperty.Register(nameof(IsShowIcon), typeof(bool), typeof(TitleBar),
+            new PropertyMetadata(true, OnPresentationPropertyChanged));
+
+    /// <summary>
+    /// Identifies the IsShowTitle dependency property.
+    /// </summary>
+    public static readonly DependencyProperty IsShowTitleProperty =
+        DependencyProperty.Register(nameof(IsShowTitle), typeof(bool), typeof(TitleBar),
+            new PropertyMetadata(true, OnPresentationPropertyChanged));
+
+    /// <summary>
+    /// Identifies the WindowIcon dependency property.
+    /// </summary>
+    public static readonly DependencyProperty WindowIconProperty =
+        DependencyProperty.Register(nameof(WindowIcon), typeof(ImageSource), typeof(TitleBar),
+            new PropertyMetadata(null, OnPresentationPropertyChanged));
 
     #endregion
 
@@ -95,6 +129,51 @@ public sealed class TitleBar : Control
         set => SetValue(ShowCloseButtonProperty, value);
     }
 
+    /// <summary>
+    /// Gets or sets the content rendered on the left side of the title bar.
+    /// </summary>
+    public FrameworkElement? LeftWindowCommands
+    {
+        get => (FrameworkElement?)GetValue(LeftWindowCommandsProperty);
+        set => SetValue(LeftWindowCommandsProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the content rendered on the right side of the title bar.
+    /// </summary>
+    public FrameworkElement? RightWindowCommands
+    {
+        get => (FrameworkElement?)GetValue(RightWindowCommandsProperty);
+        set => SetValue(RightWindowCommandsProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether to display the window icon.
+    /// </summary>
+    public bool IsShowIcon
+    {
+        get => (bool)GetValue(IsShowIconProperty)!;
+        set => SetValue(IsShowIconProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether to display the window title text.
+    /// </summary>
+    public bool IsShowTitle
+    {
+        get => (bool)GetValue(IsShowTitleProperty)!;
+        set => SetValue(IsShowTitleProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the icon displayed in the title bar.
+    /// </summary>
+    public ImageSource? WindowIcon
+    {
+        get => (ImageSource?)GetValue(WindowIconProperty);
+        set => SetValue(WindowIconProperty, value);
+    }
+
     #endregion
 
     #region Events
@@ -136,6 +215,15 @@ public sealed class TitleBar : Control
     private TitleBarButton? _minimizeButton;
     private TitleBarButton? _maximizeButton;
     private TitleBarButton? _closeButton;
+    private readonly TitleBarButton _fallbackMinimizeButton;
+    private readonly TitleBarButton _fallbackMaximizeButton;
+    private readonly TitleBarButton _fallbackCloseButton;
+    private FrameworkElement? _leftWindowCommandsHost;
+    private FrameworkElement? _rightWindowCommandsHost;
+    private FrameworkElement? _windowIconHost;
+    private FrameworkElement? _titleTextHost;
+    private bool _templateLookupAttempted;
+    private bool _hasTemplateButtons;
 
     #endregion
 
@@ -146,75 +234,102 @@ public sealed class TitleBar : Control
     /// </summary>
     public TitleBar()
     {
-        Height = 32;
         Focusable = false;
 
         // Set default backdrop effect (Gaussian blur)
         BackdropEffect = new BlurEffect(20f);
 
-        CreateButtons();
+        _fallbackMinimizeButton = new TitleBarButton { Kind = TitleBarButtonKind.Minimize };
+        _fallbackMaximizeButton = new TitleBarButton { Kind = TitleBarButtonKind.Maximize };
+        _fallbackCloseButton = new TitleBarButton { Kind = TitleBarButtonKind.Close };
+
+        _fallbackMinimizeButton.Click += OnMinimizeButtonClick;
+        _fallbackMaximizeButton.Click += OnMaximizeButtonClick;
+        _fallbackCloseButton.Click += OnCloseButtonClick;
 
         // Register for mouse events
         AddHandler(MouseDownEvent, new RoutedEventHandler(OnTitleBarMouseDown));
         AddHandler(MouseUpEvent, new RoutedEventHandler(OnTitleBarMouseUp));
         AddHandler(MouseMoveEvent, new RoutedEventHandler(OnTitleBarMouseMove));
-    }
 
-    private void CreateButtons()
-    {
-        _minimizeButton = new TitleBarButton
-        {
-            Kind = TitleBarButtonKind.Minimize
-        };
-        _minimizeButton.Click += (s, e) => MinimizeClicked?.Invoke(this, EventArgs.Empty);
-        AddVisualChild(_minimizeButton);
-
-        _maximizeButton = new TitleBarButton
-        {
-            Kind = TitleBarButtonKind.Maximize
-        };
-        _maximizeButton.Click += (s, e) => MaximizeRestoreClicked?.Invoke(this, EventArgs.Empty);
-        AddVisualChild(_maximizeButton);
-
-        _closeButton = new TitleBarButton
-        {
-            Kind = TitleBarButtonKind.Close
-        };
-        _closeButton.Click += (s, e) => CloseClicked?.Invoke(this, EventArgs.Empty);
-        AddVisualChild(_closeButton);
-
+        UpdateMaximizeButtonKind();
         UpdateButtonVisibility();
     }
 
     #endregion
 
-    #region Visual Tree
+    #region Template Parts
 
     /// <inheritdoc />
-    public override int VisualChildrenCount
+    protected override void OnApplyTemplate()
     {
-        get
+        DetachButtonHandlers();
+
+        base.OnApplyTemplate();
+
+        _templateLookupAttempted = true;
+        _minimizeButton = GetTemplateChild("PART_MinimizeButton") as TitleBarButton;
+        _maximizeButton = GetTemplateChild("PART_MaximizeButton") as TitleBarButton;
+        _closeButton = GetTemplateChild("PART_CloseButton") as TitleBarButton;
+        _hasTemplateButtons = _minimizeButton != null || _maximizeButton != null || _closeButton != null;
+        _leftWindowCommandsHost = GetTemplateChild("PART_LeftWindowCommandsHost") as FrameworkElement;
+        _rightWindowCommandsHost = GetTemplateChild("PART_RightWindowCommandsHost") as FrameworkElement;
+        _windowIconHost = GetTemplateChild("PART_WindowIconHost") as FrameworkElement;
+        _titleTextHost = GetTemplateChild("PART_TitleText") as FrameworkElement;
+
+        if (_minimizeButton != null)
         {
-            int count = 0;
-            if (_minimizeButton != null && ShowMinimizeButton) count++;
-            if (_maximizeButton != null && ShowMaximizeButton) count++;
-            if (_closeButton != null && ShowCloseButton) count++;
-            return count;
+            _minimizeButton.Kind = TitleBarButtonKind.Minimize;
+            _minimizeButton.Click += OnMinimizeButtonClick;
+        }
+
+        if (_maximizeButton != null)
+        {
+            _maximizeButton.Kind = IsMaximized ? TitleBarButtonKind.Restore : TitleBarButtonKind.Maximize;
+            _maximizeButton.Click += OnMaximizeButtonClick;
+        }
+
+        if (_closeButton != null)
+        {
+            _closeButton.Kind = TitleBarButtonKind.Close;
+            _closeButton.Click += OnCloseButtonClick;
+        }
+
+        UpdatePresentationElements();
+        UpdateButtonVisibility();
+    }
+
+    private void DetachButtonHandlers()
+    {
+        if (_minimizeButton != null)
+        {
+            _minimizeButton.Click -= OnMinimizeButtonClick;
+        }
+
+        if (_maximizeButton != null)
+        {
+            _maximizeButton.Click -= OnMaximizeButtonClick;
+        }
+
+        if (_closeButton != null)
+        {
+            _closeButton.Click -= OnCloseButtonClick;
         }
     }
 
-    /// <inheritdoc />
-    public override Visual? GetVisualChild(int index)
+    private void OnMinimizeButtonClick(object sender, RoutedEventArgs e)
     {
-        var buttons = new List<TitleBarButton?>();
-        if (_minimizeButton != null && ShowMinimizeButton) buttons.Add(_minimizeButton);
-        if (_maximizeButton != null && ShowMaximizeButton) buttons.Add(_maximizeButton);
-        if (_closeButton != null && ShowCloseButton) buttons.Add(_closeButton);
+        MinimizeClicked?.Invoke(this, EventArgs.Empty);
+    }
 
-        if (index >= 0 && index < buttons.Count)
-            return buttons[index];
+    private void OnMaximizeButtonClick(object sender, RoutedEventArgs e)
+    {
+        MaximizeRestoreClicked?.Invoke(this, EventArgs.Empty);
+    }
 
-        throw new ArgumentOutOfRangeException(nameof(index));
+    private void OnCloseButtonClick(object sender, RoutedEventArgs e)
+    {
+        CloseClicked?.Invoke(this, EventArgs.Empty);
     }
 
     #endregion
@@ -225,7 +340,7 @@ public sealed class TitleBar : Control
     {
         if (d is TitleBar titleBar)
         {
-            titleBar.InvalidateVisual();
+            titleBar.InvalidateMeasure();
         }
     }
 
@@ -246,8 +361,21 @@ public sealed class TitleBar : Control
         }
     }
 
+    private static void OnPresentationPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is TitleBar titleBar)
+        {
+            titleBar.UpdatePresentationElements();
+            titleBar.InvalidateMeasure();
+        }
+    }
+
     private void UpdateMaximizeButtonKind()
     {
+        EnsureButtonsInitialized();
+
+        _fallbackMaximizeButton.Kind = IsMaximized ? TitleBarButtonKind.Restore : TitleBarButtonKind.Maximize;
+
         if (_maximizeButton != null)
         {
             _maximizeButton.Kind = IsMaximized ? TitleBarButtonKind.Restore : TitleBarButtonKind.Maximize;
@@ -256,6 +384,12 @@ public sealed class TitleBar : Control
 
     private void UpdateButtonVisibility()
     {
+        EnsureButtonsInitialized();
+
+        _fallbackMinimizeButton.Visibility = ShowMinimizeButton ? Visibility.Visible : Visibility.Collapsed;
+        _fallbackMaximizeButton.Visibility = ShowMaximizeButton ? Visibility.Visible : Visibility.Collapsed;
+        _fallbackCloseButton.Visibility = ShowCloseButton ? Visibility.Visible : Visibility.Collapsed;
+
         if (_minimizeButton != null)
             _minimizeButton.Visibility = ShowMinimizeButton ? Visibility.Visible : Visibility.Collapsed;
         if (_maximizeButton != null)
@@ -264,58 +398,112 @@ public sealed class TitleBar : Control
             _closeButton.Visibility = ShowCloseButton ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    #endregion
-
-    #region Layout
-
-    /// <inheritdoc />
-    protected override Size MeasureOverride(Size availableSize)
+    private void UpdatePresentationElements()
     {
-        var height = Height;
+        EnsureButtonsInitialized();
 
-        // Measure buttons
-        _minimizeButton?.Measure(availableSize);
-        _maximizeButton?.Measure(availableSize);
-        _closeButton?.Measure(availableSize);
+        if (_leftWindowCommandsHost != null)
+        {
+            _leftWindowCommandsHost.Visibility = LeftWindowCommands != null
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
 
-        return new Size(availableSize.Width, double.IsInfinity(height) ? 32 : height);
+        if (_rightWindowCommandsHost != null)
+        {
+            _rightWindowCommandsHost.Visibility = RightWindowCommands != null
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        if (_windowIconHost != null)
+        {
+            _windowIconHost.Visibility = IsShowIcon && WindowIcon != null
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        if (_titleTextHost != null)
+        {
+            _titleTextHost.Visibility = IsShowTitle
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
     }
 
-    /// <inheritdoc />
-    protected override Size ArrangeOverride(Size finalSize)
+    private void EnsureButtonsInitialized()
     {
-        // Arrange buttons from right to left
-        double buttonX = finalSize.Width;
-        double buttonY = 0;
-
-        // Close button (rightmost)
-        if (_closeButton != null && ShowCloseButton)
+        if (_hasTemplateButtons || _templateLookupAttempted)
         {
-            buttonX -= _closeButton.Width;
-            var closeRect = new Rect(buttonX, buttonY, _closeButton.Width, finalSize.Height);
-            _closeButton.Arrange(closeRect);
-            // Note: Do NOT call SetVisualBounds here - ArrangeCore already handles margin
+            return;
         }
 
-        // Maximize button
-        if (_maximizeButton != null && ShowMaximizeButton)
+        _templateLookupAttempted = true;
+        if (Template != null)
         {
-            buttonX -= _maximizeButton.Width;
-            var maxRect = new Rect(buttonX, buttonY, _maximizeButton.Width, finalSize.Height);
-            _maximizeButton.Arrange(maxRect);
-            // Note: Do NOT call SetVisualBounds here - ArrangeCore already handles margin
+            ApplyTemplate();
+        }
+    }
+
+    internal TitleBarButton? GetButtonByKind(TitleBarButtonKind kind)
+    {
+        EnsureButtonsInitialized();
+
+        return kind switch
+        {
+            TitleBarButtonKind.Minimize => _minimizeButton ?? _fallbackMinimizeButton,
+            TitleBarButtonKind.Maximize or TitleBarButtonKind.Restore => _maximizeButton ?? _fallbackMaximizeButton,
+            TitleBarButtonKind.Close => _closeButton ?? _fallbackCloseButton,
+            _ => null
+        };
+    }
+
+    internal IEnumerable<TitleBarButton> EnumerateButtons()
+    {
+        EnsureButtonsInitialized();
+
+        if (_hasTemplateButtons)
+        {
+            if (_minimizeButton != null)
+                yield return _minimizeButton;
+
+            if (_maximizeButton != null)
+                yield return _maximizeButton;
+
+            if (_closeButton != null)
+                yield return _closeButton;
+            yield break;
         }
 
-        // Minimize button
-        if (_minimizeButton != null && ShowMinimizeButton)
+        yield return _fallbackMinimizeButton;
+        yield return _fallbackMaximizeButton;
+        yield return _fallbackCloseButton;
+    }
+
+    internal bool IsPointInWindowCommands(Point localPoint)
+    {
+        EnsureButtonsInitialized();
+        return IsElementHit(localPoint, _leftWindowCommandsHost) ||
+               IsElementHit(localPoint, _rightWindowCommandsHost);
+    }
+
+    private static bool IsElementHit(Point localPoint, FrameworkElement? element)
+    {
+        if (element == null || element.Visibility != Visibility.Visible)
         {
-            buttonX -= _minimizeButton.Width;
-            var minRect = new Rect(buttonX, buttonY, _minimizeButton.Width, finalSize.Height);
-            _minimizeButton.Arrange(minRect);
-            // Note: Do NOT call SetVisualBounds here - ArrangeCore already handles margin
+            return false;
         }
 
-        return finalSize;
+        var bounds = element.VisualBounds;
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return false;
+        }
+
+        return localPoint.X >= bounds.X &&
+               localPoint.X < bounds.X + bounds.Width &&
+               localPoint.Y >= bounds.Y &&
+               localPoint.Y < bounds.Y + bounds.Height;
     }
 
     #endregion
@@ -350,46 +538,4 @@ public sealed class TitleBar : Control
     }
 
     #endregion
-
-    #region Rendering
-
-    /// <inheritdoc />
-    protected override void OnRender(object drawingContext)
-    {
-        if (drawingContext is not DrawingContext dc)
-            return;
-
-        var rect = new Rect(RenderSize);
-
-        // Draw backdrop effect (blur behind)
-        if (BackdropEffect != null && BackdropEffect.HasEffect)
-        {
-            dc.DrawBackdropEffect(rect, BackdropEffect, CornerRadius);
-        }
-
-        // Draw background
-        if (Background != null)
-        {
-            dc.DrawRectangle(Background, null, rect);
-        }
-
-        // Draw title text
-        if (!string.IsNullOrEmpty(Title) && Foreground != null)
-        {
-            var fontMetrics = TextMeasurement.GetFontMetrics(FontFamily, FontSize);
-            var formattedText = new FormattedText(Title, FontFamily, FontSize)
-            {
-                Foreground = Foreground
-            };
-
-            // Position title with left padding
-            var textX = 12.0;
-            var textY = (rect.Height - fontMetrics.LineHeight) / 2;
-
-            dc.DrawText(formattedText, new Point(textX, textY));
-        }
-    }
-
-    #endregion
-
 }

@@ -34,6 +34,8 @@ public sealed class BrandThemeOptions
 public static class ThemeManager
 {
     private const string ThemeRefreshVersionKey = "__ThemeManager.Version";
+    private const string XamlAssemblyName = "Jalium.UI.Xaml";
+    private const string ThemeLoaderTypeName = "Jalium.UI.Markup.ThemeLoader";
 
     private static bool _initialized;
     private static int _themeVersion;
@@ -101,6 +103,16 @@ public static class ThemeManager
         _application = app;
         ResourceDictionary.CurrentThemeKey = CurrentTheme.ToString();
 
+        if (_initialized)
+        {
+            ForceThemeRefresh();
+            return;
+        }
+
+        EnsureXamlLoaderRegistered();
+
+        // Loading Jalium.UI.Xaml may re-enter ThemeManager.Initialize via ThemeLoader.Initialize().
+        // If that already completed initialization, stop here to avoid duplicate dictionary insertion.
         if (_initialized)
         {
             ForceThemeRefresh();
@@ -362,6 +374,30 @@ public static class ThemeManager
     private static string NormalizeFontFamily(string? value, string fallback)
     {
         return string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+    }
+
+    private static void EnsureXamlLoaderRegistered()
+    {
+        if (XamlLoader != null)
+        {
+            return;
+        }
+
+        try
+        {
+            var xamlAssembly = AppDomain.CurrentDomain
+                .GetAssemblies()
+                .FirstOrDefault(a => string.Equals(a.GetName().Name, XamlAssemblyName, StringComparison.Ordinal))
+                ?? Assembly.Load(new AssemblyName(XamlAssemblyName));
+
+            var themeLoaderType = xamlAssembly.GetType(ThemeLoaderTypeName, throwOnError: false);
+            var initializeMethod = themeLoaderType?.GetMethod("Initialize", BindingFlags.Public | BindingFlags.Static);
+            initializeMethod?.Invoke(null, null);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ThemeManager] Failed to auto-register XAML loader: {ex.Message}");
+        }
     }
 
     private static Color Blend(Color color, Color target, double factor)

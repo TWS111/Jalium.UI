@@ -67,12 +67,17 @@ public sealed class DatePickerTextBox : TextBox
     private void DrawWatermark(DrawingContext dc)
     {
         var padding = Padding;
+        var border = BorderThickness;
+        var contentWidth = Math.Max(0, RenderSize.Width - border.Left - border.Right - padding.Left - padding.Right);
         var watermarkText = Watermark?.ToString() ?? string.Empty;
 
         var watermarkBrush = new SolidColorBrush(Color.FromRgb(128, 128, 128));
         var formattedText = new FormattedText(watermarkText, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14)
         {
-            Foreground = watermarkBrush
+            Foreground = watermarkBrush,
+            MaxTextWidth = contentWidth,
+            MaxTextHeight = RenderSize.Height,
+            Trimming = TextTrimming
         };
         TextMeasurement.MeasureText(formattedText);
 

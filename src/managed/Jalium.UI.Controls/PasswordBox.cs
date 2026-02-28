@@ -132,6 +132,13 @@ public sealed class PasswordBox : Control, IImeSupport
             new PropertyMetadata(new SolidColorBrush(Color.White), OnVisualPropertyChanged));
 
     /// <summary>
+    /// Identifies the TextTrimming dependency property.
+    /// </summary>
+    public static readonly DependencyProperty TextTrimmingProperty =
+        DependencyProperty.Register(nameof(TextTrimming), typeof(TextTrimming), typeof(PasswordBox),
+            new PropertyMetadata(TextTrimming.CharacterEllipsis, OnVisualPropertyChanged));
+
+    /// <summary>
     /// Identifies the IsUndoEnabled dependency property.
     /// </summary>
     public static readonly DependencyProperty IsUndoEnabledProperty =
@@ -295,6 +302,15 @@ public sealed class PasswordBox : Control, IImeSupport
     {
         get => (Brush?)GetValue(CaretBrushProperty);
         set => SetValue(CaretBrushProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the trimming behavior for visible text when it overflows the content area.
+    /// </summary>
+    public TextTrimming TextTrimming
+    {
+        get => (TextTrimming)GetValue(TextTrimmingProperty)!;
+        set => SetValue(TextTrimmingProperty, value);
     }
 
     /// <summary>
@@ -653,7 +669,8 @@ public sealed class PasswordBox : Control, IImeSupport
                 {
                     Foreground = placeholderBrush,
                     MaxTextWidth = contentRect.Width,
-                    MaxTextHeight = contentRect.Height
+                    MaxTextHeight = contentRect.Height,
+                    Trimming = TextTrimming
                 };
                 dc.DrawText(formattedPlaceholder, new Point(contentRect.X - Math.Round(_horizontalOffset), contentRect.Y));
             }
@@ -708,7 +725,8 @@ public sealed class PasswordBox : Control, IImeSupport
         {
             Foreground = textBrush,
             MaxTextWidth = Math.Max(0, contentRect.Width + roundedHorizontalOffset),
-            MaxTextHeight = lineHeight
+            MaxTextHeight = lineHeight,
+            Trimming = TextTrimming
         };
 
         var x = contentRect.X - roundedHorizontalOffset;

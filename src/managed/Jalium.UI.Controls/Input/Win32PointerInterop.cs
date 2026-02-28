@@ -17,7 +17,9 @@ internal readonly record struct Win32PointerData(
     PointerPoint Point,
     Point Position,
     ModifierKeys Modifiers,
-    bool IsCanceled);
+    bool IsInRange,
+    bool IsCanceled,
+    StylusPointCollection StylusPoints);
 
 internal static class Win32PointerInterop
 {
@@ -115,9 +117,64 @@ internal static class Win32PointerInterop
             point,
             position,
             GetModifiers(info.dwKeyStates),
-            (info.pointerFlags & POINTER_FLAG_CANCELED) != 0);
+            (info.pointerFlags & POINTER_FLAG_INRANGE) != 0,
+            (info.pointerFlags & POINTER_FLAG_CANCELED) != 0,
+            BuildStylusPoints(kind, pointerId, info, hwnd, dpiScale, position, properties.Pressure));
 
         return true;
+    }
+
+    private static StylusPointCollection BuildStylusPoints(
+        Win32PointerKind kind,
+        uint pointerId,
+        POINTER_INFO info,
+        nint hwnd,
+        double dpiScale,
+        Point fallbackPosition,
+        float fallbackPressure)
+    {
+        // Touch and mouse inputs are represented as a single synthesized point.
+        if (kind != Win32PointerKind.Pen)
+        {
+            return new StylusPointCollection(new[] { new StylusPoint(fallbackPosition.X, fallbackPosition.Y, fallbackPressure) });
+        }
+
+        uint historyCount = Math.Max(1u, info.historyCount);
+        var history = new POINTER_PEN_INFO[historyCount];
+        uint entriesCount = historyCount;
+
+        try
+        {
+            if (GetPointerPenInfoHistory(pointerId, ref entriesCount, history) && entriesCount > 0)
+            {
+                var points = new List<StylusPoint>((int)entriesCount);
+
+                // API returns newest packets first; convert to chronological order.
+                for (int i = (int)entriesCount - 1; i >= 0; i--)
+                {
+                    var packet = history[i];
+                    var point = packet.pointerInfo.ptPixelLocation;
+                    _ = ScreenToClient(hwnd, ref point);
+
+                    float pressure = (packet.penMask & PEN_MASK_PRESSURE) != 0
+                        ? Math.Clamp(packet.pressure / 1024f, 0.0f, 1.0f)
+                        : fallbackPressure;
+
+                    points.Add(new StylusPoint(point.X / dpiScale, point.Y / dpiScale, pressure));
+                }
+
+                if (points.Count > 0)
+                {
+                    return new StylusPointCollection(points);
+                }
+            }
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Older OS/runtime: history API unavailable. Fall back to the current packet.
+        }
+
+        return new StylusPointCollection(new[] { new StylusPoint(fallbackPosition.X, fallbackPosition.Y, fallbackPressure) });
     }
 
     private static ModifierKeys GetModifiers(uint keyStates)
@@ -308,6 +365,10 @@ internal static class Win32PointerInterop
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetPointerPenInfo(uint pointerId, out POINTER_PEN_INFO penInfo);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetPointerPenInfoHistory(uint pointerId, ref uint entriesCount, [Out] POINTER_PEN_INFO[] penInfo);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

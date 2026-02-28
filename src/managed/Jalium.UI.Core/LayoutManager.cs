@@ -152,10 +152,8 @@ internal sealed class LayoutManager
         var parent = element.VisualParent as UIElement;
         while (parent != null)
         {
-            if (!parent.IsArrangeValid)
-                break;
-
-            parent.MarkArrangeInvalid();
+            if (parent.IsArrangeValid)
+                parent.MarkArrangeInvalid();
             _arrangeQueue.Add(parent);
 
             parent = parent.VisualParent as UIElement;
@@ -167,10 +165,8 @@ internal sealed class LayoutManager
         var parent = element.VisualParent as UIElement;
         while (parent != null)
         {
-            if (!parent.IsMeasureValid)
-                break;
-
-            parent.MarkMeasureInvalid();
+            if (parent.IsMeasureValid)
+                parent.MarkMeasureInvalid();
             _measureQueue.Add(parent);
             _arrangeQueue.Add(parent);
 

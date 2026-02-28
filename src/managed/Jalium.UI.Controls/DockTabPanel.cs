@@ -353,6 +353,7 @@ public sealed class DockTabPanel : Selector
         }
 
         InvalidateMeasure();
+        InvalidateArrange();
         InvalidateVisual();
     }
 
@@ -400,6 +401,7 @@ public sealed class DockTabPanel : Selector
         }
 
         InvalidateMeasure();
+        InvalidateArrange();
         InvalidateVisual();
     }
 
@@ -444,8 +446,17 @@ public sealed class DockTabPanel : Selector
         // Measure selected content (inset 1px for content border on left/right/bottom)
         var contentHeight = Math.Max(0, availableSize.Height - tabStripHeight - 1);
         var contentWidth = Math.Max(0, availableSize.Width - 2);
-        if (_selectedContentElement is FrameworkElement contentElement)
+        if (_selectedContentElement is UIElement contentElement)
+        {
+            // Reparent/switch can transiently report an undersized available size for one pass.
+            // Prefer current arranged size as fallback to avoid measuring content at near-zero width.
+            if (contentWidth <= 0 && ActualWidth > 2)
+                contentWidth = Math.Max(0, ActualWidth - 2);
+            if (contentHeight <= 0 && ActualHeight > tabStripHeight + 1)
+                contentHeight = Math.Max(0, ActualHeight - tabStripHeight - 1);
+
             contentElement.Measure(new Size(contentWidth, contentHeight));
+        }
 
         return availableSize;
     }
@@ -460,8 +471,13 @@ public sealed class DockTabPanel : Selector
 
         // Arrange content below (inset 1px for border on left/right/bottom, top seamless to active tab)
         var contentRect = new Rect(1, tabStripHeight, Math.Max(0, finalSize.Width - 2), Math.Max(0, finalSize.Height - tabStripHeight - 1));
-        if (_selectedContentElement is FrameworkElement contentElement)
+        if (_selectedContentElement is UIElement contentElement)
+        {
+            // Keep measure/arrange paired for switched content so it doesn't render stale geometry
+            // until a later unrelated invalidation arrives.
+            contentElement.Measure(new Size(contentRect.Width, contentRect.Height));
             contentElement.Arrange(contentRect);
+        }
 
         return finalSize;
     }

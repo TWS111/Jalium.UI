@@ -24,14 +24,13 @@ public sealed partial class WebView : FrameworkElement, IDisposable
     private CoreWebView2Controller? _controller;
     private CoreWebView2CompositionController? _compositionController;
     private CoreWebView2? _coreWebView2;
-    private readonly bool _isWindowlessComposition = true;
+    private readonly bool _isWindowlessComposition =
+        !string.Equals(Environment.GetEnvironmentVariable("JALIUM_WEBVIEW2_COMPOSITION"), "disable", StringComparison.OrdinalIgnoreCase);
 
-    private IDCompositionDevice? _dcompDevice;
-    private IDCompositionTarget? _dcompTarget;
-    private IDCompositionVisual? _dcompVisual;
+    private object? _compositionRootVisualTarget;
+    private nint _compositionRootVisualHandle;
+    private Interop.RenderTarget? _compositionVisualOwner;
 
-    // Embedded host window for WebView2 (child HWND)
-    private nint _hostHwnd;
     private Window? _parentWindow;
     private readonly Dispatcher _dispatcher;
     private readonly ScrollChangedEventHandler _scrollChangedHandler;
@@ -283,92 +282,41 @@ public sealed partial class WebView : FrameworkElement, IDisposable
         }
 
         Rectangle hostRect;
-        Rectangle controllerBounds;
-        if (!TryGetHostPlacement(out hostRect, out controllerBounds))
+        if (!TryGetHostPlacement(out hostRect, out _))
         {
             hostRect = new Rectangle(0, 0, 1, 1);
-            controllerBounds = new Rectangle(0, 0, 1, 1);
         }
 
-        if (_isWindowlessComposition)
+        if (!_isWindowlessComposition)
         {
-            if (!TryCreateDirectCompositionTarget(_parentWindow.Handle))
-                return;
-
-            try
-            {
-                var compositionController = await _environment.CreateCoreWebView2CompositionControllerAsync(_parentWindow.Handle);
-                if (IsInitializationStale(attachmentVersion))
-                {
-                    compositionController.Close();
-                    ReleaseDirectCompositionResources();
-                    return;
-                }
-
-                _compositionController = compositionController;
-                _compositionController.RootVisualTarget = _dcompVisual!;
-                _controller = _compositionController;
-            }
-            catch
-            {
-                ReleaseDirectCompositionResources();
-                throw;
-            }
+            SetInitializationError("WebView is configured to disable composition mode. This build requires composition mode.");
+            return;
         }
-        else
+
+        if (!TryAcquireCompositionRootVisualTarget(out var rootVisualTarget))
         {
-            if (UsesNoRedirectionBitmap(_parentWindow.Handle))
-            {
-                SetInitializationError(
-                    "Embedded WebView requires a redirected parent HWND. Set Window.SystemBackdrop = WindowBackdropType.None before showing the window.");
-                return;
-            }
+            return;
+        }
 
-            RegisterHostWindowClass();
-            _hostHwnd = CreateWindowEx(
-                0,
-                HostWindowClassName,
-                "",
-                WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-                hostRect.X, hostRect.Y, hostRect.Width, hostRect.Height,
-                _parentWindow.Handle,
-                nint.Zero,
-                GetModuleHandle(null),
-                nint.Zero);
-
-            if (_hostHwnd == nint.Zero)
-            {
-                var error = Marshal.GetLastWin32Error();
-                SetInitializationError($"Failed to create host window (Win32 error {error}).");
-                return;
-            }
-
-            if (GetParent(_hostHwnd) != _parentWindow.Handle)
-            {
-                SetInitializationError("WebView host HWND is not attached to the expected parent window.");
-                _ = DestroyWindow(_hostHwnd);
-                _hostHwnd = nint.Zero;
-                return;
-            }
-
-            _ = ShowWindow(_hostHwnd, SW_SHOW);
-            _ = SetWindowPos(_hostHwnd, HWND_BOTTOM,
-                hostRect.X, hostRect.Y, hostRect.Width, hostRect.Height,
-                SWP_NOACTIVATE | SWP_NOOWNERZORDER);
-            var controller = await _environment.CreateCoreWebView2ControllerAsync(_hostHwnd);
+        try
+        {
+            var compositionController = await _environment.CreateCoreWebView2CompositionControllerAsync(_parentWindow.Handle);
             if (IsInitializationStale(attachmentVersion))
             {
-                controller.Close();
-                if (_hostHwnd != nint.Zero)
-                {
-                    _ = DestroyWindow(_hostHwnd);
-                    _hostHwnd = nint.Zero;
-                }
-
+                compositionController.Close();
+                ReleaseCompositionResources();
                 return;
             }
 
-            _controller = controller;
+            _compositionController = compositionController;
+            _compositionController.RootVisualTarget = rootVisualTarget!;
+            _controller = _compositionController;
+            _parentWindow.ForceRenderFrame();
+        }
+        catch
+        {
+            ReleaseCompositionResources();
+            throw;
         }
 
         if (_controller == null)
@@ -395,15 +343,7 @@ public sealed partial class WebView : FrameworkElement, IDisposable
         var bg = DefaultBackgroundColor;
         _controller.DefaultBackgroundColor = System.Drawing.Color.FromArgb(bg.A, bg.R, bg.G, bg.B);
 
-        if (_hostHwnd == nint.Zero)
-        {
-            _controller.Bounds = GetAbsoluteControllerBounds(hostRect, controllerBounds);
-        }
-        else
-        {
-            // Place the controller so clipped host window still maps to full control area.
-            _controller.Bounds = controllerBounds;
-        }
+        _controller.Bounds = hostRect;
 
         _controller.IsVisible = true;
         _controller.NotifyParentWindowPositionChanged();
@@ -411,7 +351,7 @@ public sealed partial class WebView : FrameworkElement, IDisposable
         _lastHostRect = Rectangle.Empty;
         _lastControllerBounds = Rectangle.Empty;
 
-        // Track parent window movement so host window follows
+        // Track parent window movement so composition bounds stay in sync.
         _parentWindow.LocationChanged -= OnParentWindowLocationChanged;
         _parentWindow.LocationChanged += OnParentWindowLocationChanged;
         _parentWindow.SizeChanged -= OnParentWindowSizeChanged;
@@ -491,7 +431,9 @@ public sealed partial class WebView : FrameworkElement, IDisposable
 
         var visibleDip = ClipToVisibleAncestorBounds(rawDip);
         if (visibleDip.IsEmpty)
+        {
             return false;
+        }
 
         var dpi = _parentWindow.DpiScale;
         var rawPx = DipRectToPixelRect(rawDip, dpi);
@@ -513,34 +455,11 @@ public sealed partial class WebView : FrameworkElement, IDisposable
         if (_parentWindow == null)
             return Rect.Empty;
 
-        double x = 0;
-        double y = 0;
-        Visual? current = element;
-        bool reachedParentWindow = false;
-
-        while (current != null)
-        {
-            if (ReferenceEquals(current, _parentWindow))
-            {
-                reachedParentWindow = true;
-                break;
-            }
-
-            if (current is UIElement ui)
-            {
-                var bounds = ui.VisualBounds;
-                var ro = ui.RenderOffset;
-                x += bounds.X + ro.X;
-                y += bounds.Y + ro.Y;
-            }
-
-            current = current.VisualParent;
-        }
-
-        if (!reachedParentWindow)
+        var origin = element.TransformToAncestor(_parentWindow);
+        if (double.IsNaN(origin.X) || double.IsNaN(origin.Y))
             return Rect.Empty;
 
-        return new Rect(x, y, element.ActualWidth, element.ActualHeight);
+        return new Rect(origin.X, origin.Y, element.ActualWidth, element.ActualHeight);
     }
 
     private Rect ClipToVisibleAncestorBounds(Rect rawRect)
@@ -629,98 +548,55 @@ public sealed partial class WebView : FrameworkElement, IDisposable
         return Rectangle.FromLTRB(left, top, right, bottom);
     }
 
-    private static Rectangle GetAbsoluteControllerBounds(Rectangle hostRect, Rectangle controllerBounds)
+    private bool TryAcquireCompositionRootVisualTarget(out object? target)
     {
-        return new Rectangle(
-            hostRect.X + controllerBounds.X,
-            hostRect.Y + controllerBounds.Y,
-            controllerBounds.Width,
-            controllerBounds.Height);
-    }
+        target = null;
+        ReleaseCompositionResources();
 
-    private bool TryCreateDirectCompositionTarget(nint parentHwnd)
-    {
-        ReleaseDirectCompositionResources();
-
-        var iid = IID_IDCompositionDevice;
-        var hr = DCompositionCreateDevice2(nint.Zero, in iid, out var dcompDevice);
-        if (hr < 0 || dcompDevice == null)
+        if (_parentWindow?.RenderTarget == null)
         {
-            SetInitializationError($"Failed to create DirectComposition device (HRESULT 0x{hr:X8}).");
+            SetInitializationError("Parent window render target is not ready for WebView composition.");
             return false;
         }
 
-        hr = dcompDevice.CreateTargetForHwnd(parentHwnd, topmost: false, out var dcompTarget);
-        if (hr < 0 || dcompTarget == null)
+        if (!_parentWindow.RenderTarget.TryCreateWebViewCompositionVisual(out var visualHandle) || visualHandle == nint.Zero)
         {
-            Marshal.ReleaseComObject(dcompDevice);
-            if ((uint)hr == DCOMPOSITION_ERROR_WINDOW_ALREADY_COMPOSED)
+            // Parent window may still use a non-composition render target; upgrade once and retry.
+            if (!_parentWindow.EnsureCompositionRenderTargetForEmbeddedContent()
+                || _parentWindow.RenderTarget == null
+                || !_parentWindow.RenderTarget.TryCreateWebViewCompositionVisual(out visualHandle)
+                || visualHandle == nint.Zero)
             {
-                SetInitializationError(
-                    "Failed to create DirectComposition target: parent HWND is already composed (0x88980800). " +
-                    "Another WebView instance may still hold composition resources.");
+                SetInitializationError("Failed to allocate composition visual for WebView. Ensure the window uses composition render target.");
+                return false;
             }
-            else
-            {
-                SetInitializationError($"Failed to create DirectComposition target (HRESULT 0x{hr:X8}).");
-            }
-            return false;
         }
 
-        hr = dcompDevice.CreateVisual(out var dcompVisual);
-        if (hr < 0 || dcompVisual == null)
-        {
-            Marshal.ReleaseComObject(dcompTarget);
-            Marshal.ReleaseComObject(dcompDevice);
-            SetInitializationError($"Failed to create DirectComposition visual (HRESULT 0x{hr:X8}).");
-            return false;
-        }
-
-        hr = dcompTarget.SetRoot(dcompVisual);
-        if (hr < 0)
-        {
-            Marshal.ReleaseComObject(dcompVisual);
-            Marshal.ReleaseComObject(dcompTarget);
-            Marshal.ReleaseComObject(dcompDevice);
-            SetInitializationError($"Failed to set DirectComposition root visual (HRESULT 0x{hr:X8}).");
-            return false;
-        }
-
-        hr = dcompDevice.Commit();
-        if (hr < 0)
-        {
-            Marshal.ReleaseComObject(dcompVisual);
-            Marshal.ReleaseComObject(dcompTarget);
-            Marshal.ReleaseComObject(dcompDevice);
-            SetInitializationError($"Failed to commit DirectComposition changes (HRESULT 0x{hr:X8}).");
-            return false;
-        }
-
-        _dcompDevice = dcompDevice;
-        _dcompTarget = dcompTarget;
-        _dcompVisual = dcompVisual;
+        _compositionRootVisualHandle = visualHandle;
+        _compositionVisualOwner = _parentWindow.RenderTarget;
+        _compositionRootVisualTarget = visualHandle;
+        target = _compositionRootVisualTarget;
         return true;
     }
 
-    private void ReleaseDirectCompositionResources()
+    private void ReleaseCompositionResources()
     {
-        if (_dcompVisual != null)
+        _compositionRootVisualTarget = null;
+
+        if (_compositionVisualOwner != null && _compositionRootVisualHandle != nint.Zero)
         {
-            Marshal.ReleaseComObject(_dcompVisual);
-            _dcompVisual = null;
+            try
+            {
+                _compositionVisualOwner.DestroyWebViewCompositionVisual(_compositionRootVisualHandle);
+            }
+            catch
+            {
+                // Ignore shutdown cleanup failures.
+            }
         }
 
-        if (_dcompTarget != null)
-        {
-            Marshal.ReleaseComObject(_dcompTarget);
-            _dcompTarget = null;
-        }
-
-        if (_dcompDevice != null)
-        {
-            Marshal.ReleaseComObject(_dcompDevice);
-            _dcompDevice = null;
-        }
+        _compositionRootVisualHandle = nint.Zero;
+        _compositionVisualOwner = null;
     }
 
     private void UpdateHostWindowPosition(bool force = false)
@@ -730,8 +606,7 @@ public sealed partial class WebView : FrameworkElement, IDisposable
 
         var attachedToWindow = IsAttachedToParentWindow();
         Rectangle rect;
-        Rectangle controllerBounds;
-        bool hasPlacement = TryGetHostPlacement(out rect, out controllerBounds);
+        bool hasPlacement = TryGetHostPlacement(out rect, out _);
         bool shouldBeVisible = attachedToWindow
             && Visibility == Visibility.Visible
             && hasPlacement;
@@ -740,8 +615,6 @@ public sealed partial class WebView : FrameworkElement, IDisposable
         {
             if (_isHostVisible || force)
             {
-                if (_hostHwnd != nint.Zero)
-                    _ = ShowWindow(_hostHwnd, SW_HIDE);
                 _controller.IsVisible = false;
                 _isHostVisible = false;
             }
@@ -750,38 +623,22 @@ public sealed partial class WebView : FrameworkElement, IDisposable
 
         if (!_isHostVisible)
         {
-            if (_hostHwnd != nint.Zero)
-                _ = ShowWindow(_hostHwnd, SW_SHOW);
             _controller.IsVisible = true;
             _isHostVisible = true;
             force = true;
         }
 
-        if (!force && rect == _lastHostRect && controllerBounds == _lastControllerBounds)
+        var effectiveControllerBounds = rect;
+
+        if (!force && rect == _lastHostRect && effectiveControllerBounds == _lastControllerBounds)
             return;
 
-        if (_hostHwnd != nint.Zero)
-        {
-            // Keep current Z order; only move/resize the host window.
-            _ = SetWindowPos(_hostHwnd, nint.Zero,
-                rect.X, rect.Y, rect.Width, rect.Height,
-                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
-
-            // Keep web content aligned with the unclipped control rect.
-            if (force || controllerBounds != _lastControllerBounds)
-                _controller.Bounds = controllerBounds;
-        }
-        else
-        {
-            // Windowless controller bounds are in parent-window client pixels.
-            var absoluteBounds = GetAbsoluteControllerBounds(rect, controllerBounds);
-            if (force || _controller.Bounds != absoluteBounds)
-                _controller.Bounds = absoluteBounds;
-        }
+        if (force || _controller.Bounds != effectiveControllerBounds)
+            _controller.Bounds = effectiveControllerBounds;
 
         _controller.NotifyParentWindowPositionChanged();
         _lastHostRect = rect;
-        _lastControllerBounds = controllerBounds;
+        _lastControllerBounds = effectiveControllerBounds;
     }
 
     private bool IsAttachedToParentWindow()
@@ -799,13 +656,6 @@ public sealed partial class WebView : FrameworkElement, IDisposable
         }
 
         return false;
-    }
-
-    private static bool UsesNoRedirectionBitmap(nint hwnd)
-    {
-        const int GWL_EXSTYLE = -20;
-        var exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-        return (exStyle & (int)WS_EX_NOREDIRECTIONBITMAP) != 0;
     }
 
     #endregion
@@ -1155,13 +1005,7 @@ public sealed partial class WebView : FrameworkElement, IDisposable
             _parentWindow = null;
         }
 
-        if (_hostHwnd != nint.Zero)
-        {
-            _ = DestroyWindow(_hostHwnd);
-            _hostHwnd = nint.Zero;
-        }
-
-        ReleaseDirectCompositionResources();
+        ReleaseCompositionResources();
         StopPositionSyncTimer();
 
         _isInitialized = false;
@@ -1247,172 +1091,6 @@ public sealed partial class WebView : FrameworkElement, IDisposable
 
     #endregion
 
-    #region Win32 Interop
-
-    private const string HostWindowClassName = "JaliumWebViewHost";
-
-    private const uint WS_CHILD = 0x40000000;
-    private const uint WS_CLIPCHILDREN = 0x02000000;
-    private const uint WS_CLIPSIBLINGS = 0x04000000;
-    private const uint WS_EX_NOREDIRECTIONBITMAP = 0x00200000;
-
-    private const int SW_HIDE = 0;
-    private const int SW_SHOW = 5;
-
-    private const uint SWP_NOACTIVATE = 0x0010;
-    private const uint SWP_NOOWNERZORDER = 0x0200;
-    private const uint SWP_NOZORDER = 0x0004;
-    private static readonly nint HWND_BOTTOM = new nint(1);
-    private const int ERROR_CLASS_ALREADY_EXISTS = 1410;
-    private const uint DCOMPOSITION_ERROR_WINDOW_ALREADY_COMPOSED = 0x88980800;
-    private static readonly Guid IID_IDCompositionDevice = new("C37EA93A-E7AA-450D-B16F-9746CB0407F3");
-
-    private static bool _hostClassRegistered;
-    private static WndProcDelegate? _wndProcDelegate;
-    private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct WNDCLASSEX
-    {
-        public uint cbSize;
-        public uint style;
-        public nint lpfnWndProc;
-        public int cbClsExtra;
-        public int cbWndExtra;
-        public nint hInstance;
-        public nint hIcon;
-        public nint hCursor;
-        public nint hbrBackground;
-        public string? lpszMenuName;
-        public string lpszClassName;
-        public nint hIconSm;
-    }
-
-    private static void RegisterHostWindowClass()
-    {
-        if (_hostClassRegistered) return;
-
-        _wndProcDelegate = HostWndProc;
-
-        WNDCLASSEX wc = new()
-        {
-            cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
-            style = 0,
-            lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProcDelegate),
-            hInstance = GetModuleHandle(null),
-            hCursor = nint.Zero,
-            hbrBackground = nint.Zero,
-            lpszClassName = HostWindowClassName
-        };
-
-        var atom = RegisterClassEx(ref wc);
-        if (atom == 0)
-        {
-            var error = Marshal.GetLastWin32Error();
-            if (error != ERROR_CLASS_ALREADY_EXISTS)
-                throw new InvalidOperationException($"Failed to register WebView host window class. Win32 error: {error}.");
-        }
-
-        _hostClassRegistered = true;
-    }
-
-    private static nint HostWndProc(nint hWnd, uint msg, nint wParam, nint lParam)
-    {
-        // Let WebView2 handle all messages via its child HWND
-        return DefWindowProc(hWnd, msg, wParam, lParam);
-    }
-
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern ushort RegisterClassEx(ref WNDCLASSEX lpWndClass);
-
-    [LibraryImport("user32.dll", EntryPoint = "CreateWindowExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    private static partial nint CreateWindowEx(
-        uint dwExStyle, string lpClassName, string lpWindowName, uint dwStyle,
-        int x, int y, int nWidth, int nHeight,
-        nint hWndParent, nint hMenu, nint hInstance, nint lpParam);
-
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool ShowWindow(nint hWnd, int nCmdShow);
-
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool DestroyWindow(nint hWnd);
-
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool SetWindowPos(nint hWnd, nint hWndInsertAfter,
-        int X, int Y, int cx, int cy, uint uFlags);
-
-    [LibraryImport("user32.dll", EntryPoint = "DefWindowProcW")]
-    private static partial nint DefWindowProc(nint hWnd, uint msg, nint wParam, nint lParam);
-
-    [LibraryImport("user32.dll")]
-    private static partial nint GetParent(nint hWnd);
-
-    [LibraryImport("user32.dll", EntryPoint = "GetWindowLongW")]
-    private static partial int GetWindowLong(nint hWnd, int nIndex);
-
-    [LibraryImport("kernel32.dll", EntryPoint = "GetModuleHandleW", StringMarshalling = StringMarshalling.Utf16)]
-    private static partial nint GetModuleHandle(string? lpModuleName);
-
-    [DllImport("dcomp.dll", ExactSpelling = true)]
-    private static extern int DCompositionCreateDevice2(
-        nint renderingDevice,
-        in Guid iid,
-        [MarshalAs(UnmanagedType.Interface)] out IDCompositionDevice? dcompositionDevice);
-
-    [ComImport]
-    [Guid("C37EA93A-E7AA-450D-B16F-9746CB0407F3")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IDCompositionDevice
-    {
-        [PreserveSig]
-        int Commit();
-
-        [PreserveSig]
-        int WaitForCommitCompletion();
-
-        [PreserveSig]
-        int GetFrameStatistics(out DCOMPOSITION_FRAME_STATISTICS frameStatistics);
-
-        [PreserveSig]
-        int CreateTargetForHwnd(
-            nint hwnd,
-            [MarshalAs(UnmanagedType.Bool)] bool topmost,
-            out IDCompositionTarget? target);
-
-        [PreserveSig]
-        int CreateVisual(out IDCompositionVisual? visual);
-    }
-
-    [ComImport]
-    [Guid("EACDD04C-117E-4E17-88F4-D1B12B0E3D89")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IDCompositionTarget
-    {
-        [PreserveSig]
-        int SetRoot(IDCompositionVisual? visual);
-    }
-
-    [ComImport]
-    [Guid("4D93059D-097B-4651-9A60-F0F25116E2F1")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IDCompositionVisual
-    {
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct DCOMPOSITION_FRAME_STATISTICS
-    {
-        public long lastFrameTime;
-        public long currentCompositionRate;
-        public long currentTime;
-        public long timeFrequency;
-        public long nextEstimatedFrameTime;
-    }
-
-    #endregion
 }
 
 #region Event Args

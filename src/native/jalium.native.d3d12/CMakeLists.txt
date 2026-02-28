@@ -50,5 +50,5 @@ target_link_libraries(${PROJECT_NAME}
 # Set output name
 set_target_properties(${PROJECT_NAME} PROPERTIES
     OUTPUT_NAME "jalium.native.d3d12"
-    DEBUG_POSTFIX "d"
+    DEBUG_POSTFIX ""
 )

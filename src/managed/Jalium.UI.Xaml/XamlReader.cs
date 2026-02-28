@@ -172,7 +172,41 @@ public static class XamlReader
         if (stream != null) return stream;
 
         stream = assembly.GetManifestResourceStream($"{assemblyName}.{normalizedName}");
-        return stream;
+        if (stream != null) return stream;
+
+        // Fallback 1: exact resource name lookup with case-insensitive comparison.
+        var resourceNames = assembly.GetManifestResourceNames();
+        var exactIgnoreCase = resourceNames.FirstOrDefault(n =>
+            string.Equals(n, resourceName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(n, normalizedName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(n, $"{assemblyName}.{resourceName}", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(n, $"{assemblyName}.{normalizedName}", StringComparison.OrdinalIgnoreCase));
+
+        if (exactIgnoreCase != null)
+        {
+            stream = assembly.GetManifestResourceStream(exactIgnoreCase);
+            if (stream != null) return stream;
+        }
+
+        // Fallback 2: suffix match (handles namespace/path drift, e.g. Views/Foo.jalxaml vs Foo.jalxaml).
+        var fileName = resourceName.Replace('\\', '/').Split('/').LastOrDefault() ?? resourceName;
+        var suffixes = new[]
+        {
+            $".{normalizedName}",
+            $".{resourceName}",
+            $".{fileName}"
+        };
+
+        var suffixMatch = resourceNames.FirstOrDefault(n =>
+            suffixes.Any(s => n.EndsWith(s, StringComparison.OrdinalIgnoreCase)));
+
+        if (suffixMatch != null)
+        {
+            stream = assembly.GetManifestResourceStream(suffixMatch);
+            if (stream != null) return stream;
+        }
+
+        return null;
     }
 
     private static object LoadInternal(XmlReader reader, object? existingInstance, Uri? baseUri, Assembly? sourceAssembly,

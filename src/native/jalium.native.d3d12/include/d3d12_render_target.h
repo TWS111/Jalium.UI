@@ -24,6 +24,8 @@ public:
     JaliumResult Resize(int32_t width, int32_t height) override;
     JaliumResult BeginDraw() override;
     JaliumResult EndDraw() override;
+    JaliumResult CreateWebViewVisual(void** visualOut) override;
+    JaliumResult DestroyWebViewVisual(void* visual) override;
     void Clear(float r, float g, float b, float a) override;
 
     void FillRectangle(float x, float y, float w, float h, Brush* brush) override;
@@ -185,7 +187,8 @@ private:
     // DirectComposition resources (used when isComposition_ == true)
     ComPtr<IDCompositionDevice> dcompDevice_;
     ComPtr<IDCompositionTarget> dcompTarget_;
-    ComPtr<IDCompositionVisual> dcompVisual_;
+    ComPtr<IDCompositionVisual> dcompVisual_;          // Root container visual
+    ComPtr<IDCompositionVisual> dcompSwapChainVisual_; // Visual that hosts the window swap chain content
 
     // Dirty rect tracking for partial rendering
     std::vector<D2D1_RECT_F> dirtyRects_;

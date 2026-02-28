@@ -16,6 +16,8 @@
         <Setter Property="FontFamily" Value="{DynamicResource BodyFontFamily}" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         <Setter Property="Template">
             <ControlTemplate TargetType="TextBox">
                 <Border Name="OuterBorder"
@@ -67,6 +69,7 @@
         <Setter Property="FontSize" Value="14" />
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="PasswordChar" Value="*" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
 
         <Style.Triggers>
             <PropertyTrigger Property="IsMouseOver" Value="True">
@@ -94,6 +97,7 @@
         <Setter Property="FontFamily" Value="{DynamicResource BodyFontFamily}" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         <Setter Property="Template">
             <ControlTemplate TargetType="NumberBox">
                 <Border Name="OuterBorder"
@@ -177,16 +181,39 @@
         <Setter Property="FontSize" Value="14" />
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="MaxDropDownHeight" Value="200" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         <Setter Property="Template">
             <ControlTemplate TargetType="AutoCompleteBox">
-                <Border Name="OuterBorder"
-                        Background="{TemplateBinding Background}"
-                        BorderBrush="{TemplateBinding BorderBrush}"
-                        BorderThickness="{TemplateBinding BorderThickness}"
-                        CornerRadius="{TemplateBinding CornerRadius}">
-                    <Border Name="PART_ContentHost"
-                            Padding="{TemplateBinding Padding}" />
-                </Border>
+                <Grid>
+                    <Border Name="OuterBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                        <Border Name="PART_ContentHost"
+                                Padding="{TemplateBinding Padding}" />
+                    </Border>
+
+                    <Popup Name="PART_Popup"
+                           IsOpen="{TemplateBinding IsDropDownOpen}"
+                           StaysOpen="False"
+                           Placement="Bottom"
+                           PlacementTarget="{Binding RelativeSource={RelativeSource AncestorType=AutoCompleteBox}}">
+                        <Border Name="PART_DropDownBorder"
+                                Background="{DynamicResource SurfaceBackground}"
+                                BorderBrush="{DynamicResource ControlBorder}"
+                                BorderThickness="1"
+                                CornerRadius="{TemplateBinding CornerRadius}"
+                                Margin="0,4,0,0">
+                            <ScrollViewer Name="PART_DropDownScrollViewer"
+                                          MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel Name="PART_DropDownItemsHost" />
+                            </ScrollViewer>
+                        </Border>
+                    </Popup>
+                </Grid>
             </ControlTemplate>
         </Setter>
 

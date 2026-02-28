@@ -1,8 +1,9 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Jalium.UI.Controls;
 using Jalium.UI.Documents;
 using Jalium.UI.Input;
+using Jalium.UI.Input.StylusPlugIns;
 using Jalium.UI.Interop;
 
 namespace Jalium.UI.Controls.Primitives;
@@ -36,6 +37,7 @@ internal sealed partial class PopupWindow : Decorator, IWindowHost, ILayoutManag
     private readonly Dictionary<uint, PointerPoint> _lastPointerPoints = [];
     private readonly Dictionary<uint, PointerStylusDevice> _activeStylusDevices = [];
     private readonly Dictionary<uint, PointerManipulationSession> _activeManipulationSessions = [];
+    private readonly RealTimeStylus _realTimeStylus;
 
     // Static WndProc delegate and window class
     private static WndProcDelegate? _wndProcDelegate;
@@ -72,9 +74,10 @@ internal sealed partial class PopupWindow : Decorator, IWindowHost, ILayoutManag
     {
         _parentWindow = parentWindow;
         _dispatcher = Dispatcher.CurrentDispatcher;
+        _realTimeStylus = new RealTimeStylus(this);
 
         // Set PopupRoot as child in the Decorator visual tree
-        // This ensures PopupRoot → GetWindowHost() walks up to this PopupWindow
+        // This ensures PopupRoot 鈫?GetWindowHost() walks up to this PopupWindow
         Child = popupRoot;
     }
 
@@ -218,7 +221,7 @@ internal sealed partial class PopupWindow : Decorator, IWindowHost, ILayoutManag
         {
             if (_renderTarget == null || !_renderTarget.IsValid) return;
 
-            // Layout pass — _width/_height are physical pixels, layout uses DIPs
+            // Layout pass 鈥?_width/_height are physical pixels, layout uses DIPs
             var dpiScale = _parentWindow.DpiScale;
             var dipWidth = _width / dpiScale;
             var dipHeight = _height / dpiScale;
@@ -832,40 +835,209 @@ internal sealed partial class PopupWindow : Decorator, IWindowHost, ILayoutManag
             _activeStylusDevices[pointerData.PointerId] = stylusDevice;
         }
 
+        Tablet.CurrentStylusDevice = stylusDevice;
+
         var properties = pointerData.Point.Properties;
         stylusDevice.UpdateState(
             pointerData.Position,
-            Math.Clamp(properties.Pressure, 0f, 1f),
+            pointerData.StylusPoints,
             inAir: !pointerData.Point.IsInContact,
             inverted: properties.IsInverted,
-            inRange: true,
+            inRange: pointerData.IsInRange,
             barrelPressed: properties.IsBarrelButtonPressed,
             eraserPressed: properties.IsEraser,
             directlyOver: target);
 
+        StylusInputAction inputAction = ResolveStylusInputAction(isDown, isUp, pointerData.Point.IsInContact);
+        RealTimeStylusProcessResult processResult = _realTimeStylus.Process(
+            pointerData.PointerId,
+            target,
+            inputAction,
+            stylusDevice.GetStylusPoints(target),
+            timestamp,
+            inAir: !pointerData.Point.IsInContact,
+            inRange: pointerData.IsInRange,
+            barrelButtonPressed: properties.IsBarrelButtonPressed,
+            eraserPressed: properties.IsEraser,
+            inverted: properties.IsInverted,
+            pointerCanceled: pointerData.IsCanceled);
+
+        stylusDevice.UpdateState(
+            pointerData.Position,
+            processResult.RawStylusInput.GetStylusPoints(),
+            inAir: !pointerData.Point.IsInContact,
+            inverted: properties.IsInverted,
+            inRange: pointerData.IsInRange,
+            barrelPressed: properties.IsBarrelButtonPressed,
+            eraserPressed: properties.IsEraser,
+            directlyOver: target);
+
+        RaiseStylusExtendedEvents(target, stylusDevice, timestamp, inputAction, processResult);
+
         RoutedEvent previewEvent = isDown ? PreviewStylusDownEvent : (isUp ? PreviewStylusUpEvent : PreviewStylusMoveEvent);
         RoutedEvent bubbleEvent = isDown ? StylusDownEvent : (isUp ? StylusUpEvent : StylusMoveEvent);
 
-        StylusEventArgs previewArgs = isDown
-            ? new StylusDownEventArgs(stylusDevice, timestamp) { RoutedEvent = previewEvent }
-            : new StylusEventArgs(stylusDevice, timestamp) { RoutedEvent = previewEvent };
+        StylusEventArgs previewArgs = CreateStylusEventArgs(stylusDevice, timestamp, previewEvent, isDown);
         target.RaiseEvent(previewArgs);
         sourceHandled |= previewArgs.Handled;
-        sourceCanceled |= previewArgs.Cancel;
+        sourceCanceled |= previewArgs.Cancel || processResult.Canceled;
 
-        if (!previewArgs.Handled)
+        if (!previewArgs.Handled && !processResult.Canceled)
         {
-            StylusEventArgs bubbleArgs = isDown
-                ? new StylusDownEventArgs(stylusDevice, timestamp) { RoutedEvent = bubbleEvent }
-                : new StylusEventArgs(stylusDevice, timestamp) { RoutedEvent = bubbleEvent };
+            StylusEventArgs bubbleArgs = CreateStylusEventArgs(stylusDevice, timestamp, bubbleEvent, isDown);
             target.RaiseEvent(bubbleArgs);
             sourceHandled |= bubbleArgs.Handled;
             sourceCanceled |= bubbleArgs.Cancel;
         }
 
-        if (isUp || sourceCanceled)
+        _realTimeStylus.QueueProcessedCallbacks(processResult);
+
+        if (isUp || sourceCanceled || processResult.SessionEnded)
         {
             _activeStylusDevices.Remove(pointerData.PointerId);
+            if (ReferenceEquals(Tablet.CurrentStylusDevice, stylusDevice))
+            {
+                Tablet.CurrentStylusDevice = null;
+            }
+        }
+    }
+
+    private static StylusInputAction ResolveStylusInputAction(bool isDown, bool isUp, bool isInContact)
+    {
+        if (isDown)
+        {
+            return StylusInputAction.Down;
+        }
+
+        if (isUp)
+        {
+            return StylusInputAction.Up;
+        }
+
+        return isInContact ? StylusInputAction.Move : StylusInputAction.InAirMove;
+    }
+
+    private static StylusEventArgs CreateStylusEventArgs(StylusDevice stylusDevice, int timestamp, RoutedEvent routedEvent, bool isDown)
+    {
+        StylusEventArgs args = isDown
+            ? new StylusDownEventArgs(stylusDevice, timestamp)
+            : new StylusEventArgs(stylusDevice, timestamp);
+        args.RoutedEvent = routedEvent;
+        return args;
+    }
+
+    private static StylusButton? GetBarrelButton(StylusDevice stylusDevice)
+    {
+        foreach (var button in stylusDevice.StylusButtons)
+        {
+            if (button.Name.Equals("Barrel", StringComparison.OrdinalIgnoreCase))
+            {
+                return button;
+            }
+        }
+
+        return stylusDevice.StylusButtons.Count > 0 ? stylusDevice.StylusButtons[0] : null;
+    }
+
+    private static void RaiseStylusSimpleEvent(UIElement target, StylusDevice stylusDevice, int timestamp, RoutedEvent routedEvent)
+    {
+        var args = new StylusEventArgs(stylusDevice, timestamp) { RoutedEvent = routedEvent };
+        target.RaiseEvent(args);
+    }
+
+    private static void RaiseStylusSystemGestureEvent(UIElement target, StylusDevice stylusDevice, int timestamp, SystemGesture gesture)
+    {
+        var args = new StylusSystemGestureEventArgs(stylusDevice, timestamp, gesture)
+        {
+            RoutedEvent = StylusSystemGestureEvent
+        };
+        target.RaiseEvent(args);
+    }
+
+    private static void RaiseStylusButtonEvent(UIElement target, StylusDevice stylusDevice, int timestamp, RoutedEvent routedEvent)
+    {
+        StylusButton? button = GetBarrelButton(stylusDevice);
+        if (button == null)
+        {
+            return;
+        }
+
+        var args = new StylusButtonEventArgs(stylusDevice, timestamp, button)
+        {
+            RoutedEvent = routedEvent
+        };
+        target.RaiseEvent(args);
+    }
+
+    private static void RaiseStylusExtendedEvents(
+        UIElement target,
+        StylusDevice stylusDevice,
+        int timestamp,
+        StylusInputAction inputAction,
+        RealTimeStylusProcessResult processResult)
+    {
+        if (processResult.LeftElement && processResult.PreviousTarget != null)
+        {
+            RaiseStylusSimpleEvent(processResult.PreviousTarget, stylusDevice, timestamp, StylusLeaveEvent);
+        }
+
+        if (processResult.EnteredElement)
+        {
+            RaiseStylusSimpleEvent(target, stylusDevice, timestamp, StylusEnterEvent);
+        }
+
+        if (processResult.EnteredRange)
+        {
+            RaiseStylusSimpleEvent(target, stylusDevice, timestamp, StylusInRangeEvent);
+            RaiseStylusSystemGestureEvent(target, stylusDevice, timestamp, SystemGesture.HoverEnter);
+        }
+
+        if (processResult.ExitedRange)
+        {
+            RaiseStylusSimpleEvent(processResult.PreviousTarget ?? target, stylusDevice, timestamp, StylusOutOfRangeEvent);
+            RaiseStylusSystemGestureEvent(processResult.PreviousTarget ?? target, stylusDevice, timestamp, SystemGesture.HoverLeave);
+        }
+
+        if (processResult.BarrelButtonDown)
+        {
+            RaiseStylusButtonEvent(target, stylusDevice, timestamp, StylusButtonDownEvent);
+        }
+
+        if (processResult.BarrelButtonUp)
+        {
+            RaiseStylusButtonEvent(target, stylusDevice, timestamp, StylusButtonUpEvent);
+        }
+
+        switch (inputAction)
+        {
+            case StylusInputAction.Down:
+                RaiseStylusSystemGestureEvent(
+                    target,
+                    stylusDevice,
+                    timestamp,
+                    stylusDevice.StylusButtons.Count > 0 && stylusDevice.StylusButtons[0].StylusButtonState == StylusButtonState.Down
+                        ? SystemGesture.RightTap
+                        : SystemGesture.Tap);
+                RaiseStylusSystemGestureEvent(target, stylusDevice, timestamp, SystemGesture.HoldEnter);
+                break;
+
+            case StylusInputAction.Move:
+                RaiseStylusSystemGestureEvent(
+                    target,
+                    stylusDevice,
+                    timestamp,
+                    stylusDevice.StylusButtons.Count > 0 && stylusDevice.StylusButtons[0].StylusButtonState == StylusButtonState.Down
+                        ? SystemGesture.RightDrag
+                        : SystemGesture.Drag);
+                break;
+
+            case StylusInputAction.InAirMove:
+                RaiseStylusSimpleEvent(target, stylusDevice, timestamp, StylusInAirMoveEvent);
+                break;
+
+            case StylusInputAction.Up:
+                RaiseStylusSystemGestureEvent(target, stylusDevice, timestamp, SystemGesture.HoldLeave);
+                break;
         }
     }
 
@@ -1249,7 +1421,16 @@ internal sealed partial class PopupWindow : Decorator, IWindowHost, ILayoutManag
     {
         _activePointerTargets.Remove(pointerId);
         _lastPointerPoints.Remove(pointerId);
-        _activeStylusDevices.Remove(pointerId);
+        if (_activeStylusDevices.TryGetValue(pointerId, out var stylusDevice))
+        {
+            _activeStylusDevices.Remove(pointerId);
+            if (ReferenceEquals(Tablet.CurrentStylusDevice, stylusDevice))
+            {
+                Tablet.CurrentStylusDevice = null;
+            }
+        }
+
+        _realTimeStylus.CancelSession(pointerId);
         _activeManipulationSessions.Remove(pointerId);
 
         TouchDevice? touchDevice = Touch.GetDevice((int)pointerId);
@@ -1714,3 +1895,4 @@ internal sealed partial class PopupWindow : Decorator, IWindowHost, ILayoutManag
 
     #endregion
 }
+

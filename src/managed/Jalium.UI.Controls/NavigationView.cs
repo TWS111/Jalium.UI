@@ -542,6 +542,8 @@ public sealed class NavigationView : ContentControl
                     }
                 }
             }
+
+            navItem.RefreshHierarchyVisualState();
         }
     }
 

@@ -7,7 +7,8 @@ namespace Jalium.UI.Xaml.SourceGenerator;
 /// </summary>
 public static class JalxamlParser
 {
-    private const string XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+    private const string LegacyXamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+    private const string JaliumMarkupNamespace = "https://schemas.jalium.dev/jalxaml/markup";
     private const string JaliumNamespace = "http://schemas.jalium.ui/2024";
     private const string PresentationNamespace = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
 
@@ -64,8 +65,8 @@ public static class JalxamlParser
                 // Parse root element
                 result.RootElementType = GetTypeName(reader.LocalName);
 
-                // Look for x:Class attribute
-                var classAttr = reader.GetAttribute("Class", XamlNamespace);
+                // Look for x:Class attribute (legacy/new namespace + prefix fallback)
+                var classAttr = GetClassAttributeValue(reader);
                 if (!string.IsNullOrEmpty(classAttr))
                 {
                     result.ClassName = classAttr;
@@ -85,13 +86,13 @@ public static class JalxamlParser
         var elementName = reader.LocalName;
         var typeName = GetTypeName(elementName);
 
-        // Check for x:Name attribute
-        var nameAttr = reader.GetAttribute("Name", XamlNamespace);
+        // Check for x:Name attribute (legacy/new namespace + prefix fallback)
+        var nameAttr = GetNameAttributeValue(reader);
         if (!string.IsNullOrEmpty(nameAttr))
         {
             result.NamedElements.Add(new NamedElement
             {
-                Name = nameAttr,
+                Name = nameAttr!,
                 TypeName = typeName
             });
         }
@@ -143,5 +144,59 @@ public static class JalxamlParser
 
         // Default to element name (assume it's a valid type)
         return elementName;
+    }
+
+    private static string? GetClassAttributeValue(XmlReader reader)
+    {
+        var classAttr = reader.GetAttribute("Class", LegacyXamlNamespace);
+        if (!string.IsNullOrEmpty(classAttr))
+            return classAttr;
+
+        classAttr = reader.GetAttribute("Class", JaliumMarkupNamespace);
+        if (!string.IsNullOrEmpty(classAttr))
+            return classAttr;
+
+        return GetPrefixedAttributeFallback(reader, "Class");
+    }
+
+    private static string? GetNameAttributeValue(XmlReader reader)
+    {
+        var nameAttr = reader.GetAttribute("Name", LegacyXamlNamespace);
+        if (!string.IsNullOrEmpty(nameAttr))
+            return nameAttr;
+
+        nameAttr = reader.GetAttribute("Name", JaliumMarkupNamespace);
+        if (!string.IsNullOrEmpty(nameAttr))
+            return nameAttr;
+
+        // Compatibility: allow unprefixed Name in markup.
+        nameAttr = reader.GetAttribute("Name");
+        if (!string.IsNullOrEmpty(nameAttr))
+            return nameAttr;
+
+        return GetPrefixedAttributeFallback(reader, "Name");
+    }
+
+    private static string? GetPrefixedAttributeFallback(XmlReader reader, string localName)
+    {
+        if (!reader.HasAttributes)
+            return null;
+
+        for (var i = 0; i < reader.AttributeCount; i++)
+        {
+            reader.MoveToAttribute(i);
+            if (!string.Equals(reader.LocalName, localName, StringComparison.Ordinal))
+                continue;
+
+            if (string.Equals(reader.Prefix, "x", StringComparison.Ordinal))
+            {
+                var value = reader.Value;
+                reader.MoveToElement();
+                return value;
+            }
+        }
+
+        reader.MoveToElement();
+        return null;
     }
 }

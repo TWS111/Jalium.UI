@@ -27,6 +27,7 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
     private static readonly SolidColorBrush s_dropdownBgBrush = new(Color.FromRgb(50, 50, 50));
     private static readonly SolidColorBrush s_dropdownBorderFallbackBrush = new(Color.FromRgb(100, 100, 100));
     private static readonly SolidColorBrush s_dropdownSelectionBrush = new(Color.FromRgb(0, 120, 215));
+    private static readonly SolidColorBrush s_transparentBrush = new(Color.FromArgb(0, 0, 0, 0));
     private static readonly SolidColorBrush s_dropdownHoverBrush = new(Color.FromRgb(70, 70, 70));
 
     #endregion
@@ -54,6 +55,11 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
     private bool _isUpdatingText;
     private DateTime _lastFilterTime;
     private DispatcherTimer? _filterDelayTimer;
+    private bool _suppressNextTabTextInput;
+
+    // Popup-based dropdown state
+    private Popup? _popup;
+    private StackPanel? _dropDownItemsPanel;
 
     // Constants
     private const double DefaultHeight = 32;
@@ -372,7 +378,7 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
         BorderBrush = new SolidColorBrush(Color.FromRgb(100, 100, 100));
         BorderThickness = new Thickness(1);
         Padding = new Thickness(8, 6, 8, 6);
-        CornerRadius = new CornerRadius(4);
+        CornerRadius = new CornerRadius(8);
         FontSize = 14;
         Height = DefaultHeight;
 
@@ -387,6 +393,32 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
         // Subscribe to focus events
         AddHandler(GotKeyboardFocusEvent, new RoutedEventHandler(OnGotFocusHandler));
         AddHandler(LostKeyboardFocusEvent, new RoutedEventHandler(OnLostFocusHandler));
+        SizeChanged += OnAutoCompleteBoxSizeChanged;
+    }
+
+    /// <inheritdoc />
+    protected override void OnApplyTemplate()
+    {
+        if (_popup != null)
+        {
+            _popup.Closed -= OnPopupClosed;
+        }
+
+        base.OnApplyTemplate();
+
+        _popup = GetTemplateChild("PART_Popup") as Popup;
+        _dropDownItemsPanel = GetTemplateChild("PART_DropDownItemsHost") as StackPanel;
+
+        if (_popup != null)
+        {
+            _popup.PlacementTarget = this;
+            _popup.Closed += OnPopupClosed;
+        }
+
+        EnsureDropDownItemsPanel();
+        UpdatePopupPlacementAndWidth();
+        RefreshDropDownItems();
+        SyncPopupOpenState();
     }
 
     private void OnGotFocusHandler(object sender, RoutedEventArgs e)
@@ -401,8 +433,26 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
         {
             InputMethod.SetTarget(null);
         }
-        IsDropDownOpen = false;
+        // In popup mode, keep the dropdown open while user is interacting with it via mouse.
+        // For keyboard focus moves (e.g. Tab to next control), close immediately.
+        if (_popup == null || !_popup.IsMouseOver)
+        {
+            IsDropDownOpen = false;
+        }
         InvalidateVisual();
+    }
+
+    private void OnAutoCompleteBoxSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        UpdatePopupPlacementAndWidth();
+    }
+
+    private void OnPopupClosed(object? sender, EventArgs e)
+    {
+        if (IsDropDownOpen)
+        {
+            SetValue(IsDropDownOpenProperty, false);
+        }
     }
 
     private void OnImeCompositionStarted(object? sender, EventArgs e)
@@ -540,12 +590,14 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
                 if (IsDropDownOpen && FilteredItems.Count > 0)
                 {
                     _selectedSuggestionIndex = Math.Min(_selectedSuggestionIndex + 1, FilteredItems.Count - 1);
+                    UpdateDropDownSelectionVisuals();
                     InvalidateVisual();
                 }
                 else if (FilteredItems.Count > 0)
                 {
                     IsDropDownOpen = true;
                     _selectedSuggestionIndex = 0;
+                    RefreshDropDownItems();
                 }
                 e.Handled = true;
                 return;
@@ -554,6 +606,7 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
                 if (IsDropDownOpen && _selectedSuggestionIndex > 0)
                 {
                     _selectedSuggestionIndex--;
+                    UpdateDropDownSelectionVisuals();
                     InvalidateVisual();
                 }
                 e.Handled = true;
@@ -582,6 +635,7 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
                 {
                     SelectSuggestion(_selectedSuggestionIndex);
                     IsDropDownOpen = false;
+                    _suppressNextTabTextInput = true;
                     e.Handled = true;
                     return;
                 }
@@ -600,6 +654,18 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
     {
         if (IsReadOnly || string.IsNullOrEmpty(textToInsert))
             return;
+
+        // Tab completion should not also insert a literal tab character.
+        // Also keep default single-line behavior when AcceptsTab is false.
+        var suppressTab = _suppressNextTabTextInput;
+        _suppressNextTabTextInput = false;
+
+        if (textToInsert.IndexOf('\t') >= 0 && (suppressTab || !AcceptsTab))
+        {
+            textToInsert = textToInsert.Replace("\t", string.Empty);
+            if (string.IsNullOrEmpty(textToInsert))
+                return;
+        }
 
         PushUndo();
 
@@ -674,6 +740,7 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
         if (ItemsSource == null || string.IsNullOrEmpty(_text) || _text.Length < MinimumPrefixLength)
         {
             IsDropDownOpen = false;
+            RefreshDropDownItems();
             return;
         }
 
@@ -712,6 +779,7 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
             IsDropDownOpen = false;
         }
 
+        RefreshDropDownItems();
         InvalidateVisual();
     }
 
@@ -778,6 +846,7 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
 
         SelectedItem = item;
         IsDropDownOpen = false;
+        RefreshDropDownItems();
 
         var args = new SelectionChangedEventArgs(SelectionChangedEvent,
             oldItem != null ? new[] { oldItem } : Array.Empty<object>(),
@@ -787,6 +856,105 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
         InvalidateVisual();
     }
 
+    private void EnsureDropDownItemsPanel()
+    {
+        if (_dropDownItemsPanel != null)
+            return;
+
+        if (_popup?.Child is Border border && border.Child is ScrollViewer scrollViewer)
+        {
+            if (scrollViewer.Content is StackPanel panel)
+            {
+                _dropDownItemsPanel = panel;
+            }
+            else
+            {
+                _dropDownItemsPanel = new StackPanel();
+                scrollViewer.Content = _dropDownItemsPanel;
+            }
+        }
+    }
+
+    private void RefreshDropDownItems()
+    {
+        EnsureDropDownItemsPanel();
+        if (_dropDownItemsPanel == null)
+        {
+            SyncPopupOpenState();
+            return;
+        }
+
+        _dropDownItemsPanel.Children.Clear();
+
+        for (var i = 0; i < FilteredItems.Count; i++)
+        {
+            var index = i;
+            var item = FilteredItems[i];
+
+            var itemContainer = new ComboBoxItem
+            {
+                Content = GetItemText(item),
+                Tag = item,
+                Foreground = Foreground ?? s_whiteBrush,
+                MinHeight = ItemHeight,
+                Background = index == _selectedSuggestionIndex ? s_dropdownSelectionBrush : s_transparentBrush
+            };
+
+            itemContainer.ItemClicked += (s, e) => SelectSuggestion(index);
+            _dropDownItemsPanel.Children.Add(itemContainer);
+        }
+
+        SyncPopupOpenState();
+    }
+
+    private void UpdateDropDownSelectionVisuals()
+    {
+        if (_dropDownItemsPanel == null)
+            return;
+
+        for (var i = 0; i < _dropDownItemsPanel.Children.Count; i++)
+        {
+            if (_dropDownItemsPanel.Children[i] is ComboBoxItem itemContainer)
+            {
+                itemContainer.Background = i == _selectedSuggestionIndex ? s_dropdownSelectionBrush : s_transparentBrush;
+            }
+        }
+    }
+
+    private void UpdatePopupPlacementAndWidth()
+    {
+        if (_popup == null)
+            return;
+
+        _popup.PlacementTarget = this;
+
+        var popupWidth = ActualWidth;
+        if (popupWidth <= 0 || double.IsNaN(popupWidth) || double.IsInfinity(popupWidth))
+        {
+            if (!double.IsNaN(Width) && !double.IsInfinity(Width) && Width > 0)
+                popupWidth = Width;
+        }
+
+        if (popupWidth > 0 && !double.IsNaN(popupWidth) && !double.IsInfinity(popupWidth))
+        {
+            _popup.Width = popupWidth;
+            _popup.MinWidth = popupWidth;
+            _popup.MaxWidth = popupWidth;
+        }
+    }
+
+    private void SyncPopupOpenState()
+    {
+        if (_popup == null)
+            return;
+
+        var shouldOpen = IsDropDownOpen && FilteredItems.Count > 0;
+        if (_popup.IsOpen != shouldOpen)
+        {
+            _popup.IsOpen = shouldOpen;
+        }
+    }
+
     #endregion
 
     #region Mouse Handling
@@ -794,8 +962,8 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
     /// <inheritdoc />
     protected override int GetCaretIndexFromPosition(Point position)
     {
-        // Check if click is on dropdown
-        if (IsDropDownOpen && position.Y > DefaultHeight)
+        // In non-popup rendering mode, the dropdown is drawn below the input box.
+        if (_popup == null && IsDropDownOpen && position.Y > DefaultHeight)
         {
             var dropdownY = position.Y - DefaultHeight;
             var suggestionIndex = (int)(dropdownY / ItemHeight);
@@ -851,10 +1019,11 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
     protected override void OnRender(object drawingContext)
     {
         // If using content host, text rendering is handled by TextBoxContentHost
-        // But AutoCompleteBox still needs to draw dropdown
+        // In template + popup mode, dropdown is rendered by Popup content.
+        // Keep drawing fallback only for non-popup templates.
         if (HasContentHost)
         {
-            if (drawingContext is DrawingContext dc && IsDropDownOpen && FilteredItems.Count > 0)
+            if (_popup == null && drawingContext is DrawingContext dc && IsDropDownOpen && FilteredItems.Count > 0)
             {
                 DrawDropDown(dc);
             }
@@ -931,7 +1100,10 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
         {
             var watermarkText = new FormattedText(Watermark, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14)
             {
-                Foreground = s_watermarkBrush
+                Foreground = s_watermarkBrush,
+                MaxTextWidth = contentRect.Width,
+                MaxTextHeight = lineHeight,
+                Trimming = TextTrimming
             };
             TextMeasurement.MeasureText(watermarkText);
             var textY = (contentRect.Height - watermarkText.Height) / 2;
@@ -941,7 +1113,10 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
         {
             var formattedText = new FormattedText(_text, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14)
             {
-                Foreground = Foreground ?? s_whiteBrush
+                Foreground = Foreground ?? s_whiteBrush,
+                MaxTextWidth = contentRect.Width,
+                MaxTextHeight = lineHeight,
+                Trimming = TextTrimming
             };
             TextMeasurement.MeasureText(formattedText);
             var textY = (contentRect.Height - formattedText.Height) / 2;
@@ -1123,10 +1298,13 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
         {
             if ((bool)e.NewValue)
             {
+                autoComplete.UpdatePopupPlacementAndWidth();
+                autoComplete.RefreshDropDownItems();
                 autoComplete.RaiseEvent(new RoutedEventArgs(DropDownOpenedEvent, autoComplete));
             }
             else
             {
+                autoComplete.SyncPopupOpenState();
                 autoComplete.RaiseEvent(new RoutedEventArgs(DropDownClosedEvent, autoComplete));
             }
             autoComplete.InvalidateMeasure();
@@ -1147,6 +1325,7 @@ public sealed class AutoCompleteBox : TextBoxBase, IImeSupport
     {
         if (d is AutoCompleteBox autoComplete)
         {
+            autoComplete.UpdateDropDownSelectionVisuals();
             autoComplete.InvalidateVisual();
         }
     }

@@ -137,10 +137,20 @@ bool D3D12RenderTarget::CreateSwapChain() {
         hr = dcompDevice_->CreateTargetForHwnd(hwnd_, TRUE, &dcompTarget_);
         if (FAILED(hr)) return false;
 
+        // Build a two-layer composition tree:
+        // - root container visual
+        // - swap chain visual (Jalium scene)
+        // WebView visuals are inserted as siblings above the swap chain visual.
         hr = dcompDevice_->CreateVisual(&dcompVisual_);
         if (FAILED(hr)) return false;
 
-        hr = dcompVisual_->SetContent(swapChain1.Get());
+        hr = dcompDevice_->CreateVisual(&dcompSwapChainVisual_);
+        if (FAILED(hr)) return false;
+
+        hr = dcompSwapChainVisual_->SetContent(swapChain1.Get());
+        if (FAILED(hr)) return false;
+
+        hr = dcompVisual_->AddVisual(dcompSwapChainVisual_.Get(), FALSE, nullptr);
         if (FAILED(hr)) return false;
 
         hr = dcompTarget_->SetRoot(dcompVisual_.Get());
@@ -543,6 +553,63 @@ void D3D12RenderTarget::SetFullInvalidation() {
     dirtyRects_.clear();
 }
 
+JaliumResult D3D12RenderTarget::CreateWebViewVisual(void** visualOut) {
+    if (!visualOut) {
+        return JALIUM_ERROR_INVALID_ARGUMENT;
+    }
+
+    *visualOut = nullptr;
+
+    if (!isComposition_ || !dcompDevice_ || !dcompVisual_ || !dcompSwapChainVisual_) {
+        return JALIUM_ERROR_NOT_SUPPORTED;
+    }
+
+    ComPtr<IDCompositionVisual> childVisual;
+    HRESULT hr = dcompDevice_->CreateVisual(&childVisual);
+    if (FAILED(hr) || !childVisual) {
+        return JALIUM_ERROR_RESOURCE_CREATION_FAILED;
+    }
+
+    // Always keep WebView visuals above the Jalium swap chain visual.
+    hr = dcompVisual_->AddVisual(childVisual.Get(), TRUE, dcompSwapChainVisual_.Get());
+    if (FAILED(hr)) {
+        return JALIUM_ERROR_INVALID_STATE;
+    }
+
+    hr = dcompDevice_->Commit();
+    if (FAILED(hr)) {
+        dcompVisual_->RemoveVisual(childVisual.Get());
+        dcompDevice_->Commit();
+        return JALIUM_ERROR_INVALID_STATE;
+    }
+
+    childVisual->AddRef();
+    *visualOut = childVisual.Get();
+    return JALIUM_OK;
+}
+
+JaliumResult D3D12RenderTarget::DestroyWebViewVisual(void* visual) {
+    if (!visual) {
+        return JALIUM_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto* childVisual = reinterpret_cast<IDCompositionVisual*>(visual);
+
+    if (!isComposition_ || !dcompDevice_ || !dcompVisual_) {
+        childVisual->Release();
+        return JALIUM_ERROR_NOT_SUPPORTED;
+    }
+
+    HRESULT hr = dcompVisual_->RemoveVisual(childVisual);
+    childVisual->Release();
+    if (FAILED(hr)) {
+        return JALIUM_ERROR_INVALID_STATE;
+    }
+
+    hr = dcompDevice_->Commit();
+    return FAILED(hr) ? JALIUM_ERROR_INVALID_STATE : JALIUM_OK;
+}
+
 JaliumResult D3D12RenderTarget::BeginDraw() {
     if (isDrawing_) return JALIUM_ERROR_INVALID_STATE;
 
@@ -647,6 +714,14 @@ JaliumResult D3D12RenderTarget::EndDraw() {
     }
 
     if (FAILED(hr)) return fail(JALIUM_ERROR_DEVICE_LOST);
+
+    // Commit DirectComposition every frame in composition mode.
+    // WebView may attach/update visuals under the provided RootVisualTarget;
+    // those visual tree changes become visible only after a device commit.
+    if (isComposition_ && dcompDevice_) {
+        hr = dcompDevice_->Commit();
+        if (FAILED(hr)) return fail(JALIUM_ERROR_DEVICE_LOST);
+    }
 
     // Clear dirty state for next frame
     dirtyRects_.clear();

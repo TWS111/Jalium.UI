@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using Jalium.UI.Controls.Primitives;
 using Jalium.UI.Input;
+using Jalium.UI.Input.StylusPlugIns;
 using Jalium.UI.Interop;
 using Jalium.UI.Media;
 #if DEBUG
@@ -29,6 +30,9 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
     // Both are submitted as dirty rects so vacated areas (FLIP_SEQUENTIAL) are repainted.
     private readonly Dictionary<UIElement, Rect> _dirtyElements = new();
     private readonly object _dirtyLock = new(); // Protects _dirtyElements from cross-thread access
+    private int _appliedDwmTopMarginPhysical = -1;
+    private bool _attemptedAutoWindowIcon;
+    private const double DefaultTitleBarHeightDip = 32.0;
 
     /// <summary>
     /// Gets the layout manager for this window.
@@ -92,6 +96,76 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
     public static readonly DependencyProperty WindowStyleProperty =
         DependencyProperty.Register(nameof(WindowStyle), typeof(WindowStyle), typeof(Window),
             new PropertyMetadata(WindowStyle.SingleBorderWindow));
+
+    /// <summary>
+    /// Identifies the LeftWindowCommands dependency property.
+    /// </summary>
+    public static readonly DependencyProperty LeftWindowCommandsProperty =
+        DependencyProperty.Register(nameof(LeftWindowCommands), typeof(FrameworkElement), typeof(Window),
+            new PropertyMetadata(null, OnWindowTitleBarPresentationChanged));
+
+    /// <summary>
+    /// Identifies the RightWindowCommands dependency property.
+    /// </summary>
+    public static readonly DependencyProperty RightWindowCommandsProperty =
+        DependencyProperty.Register(nameof(RightWindowCommands), typeof(FrameworkElement), typeof(Window),
+            new PropertyMetadata(null, OnWindowTitleBarPresentationChanged));
+
+    /// <summary>
+    /// Identifies the IsShowIcon dependency property.
+    /// </summary>
+    public static readonly DependencyProperty IsShowIconProperty =
+        DependencyProperty.Register(nameof(IsShowIcon), typeof(bool), typeof(Window),
+            new PropertyMetadata(true, OnWindowTitleBarPresentationChanged));
+
+    /// <summary>
+    /// Identifies the IsShowTitle dependency property.
+    /// </summary>
+    public static readonly DependencyProperty IsShowTitleProperty =
+        DependencyProperty.Register(nameof(IsShowTitle), typeof(bool), typeof(Window),
+            new PropertyMetadata(true, OnWindowTitleBarPresentationChanged));
+
+    /// <summary>
+    /// Identifies the IsShowTitleBar dependency property.
+    /// </summary>
+    public static readonly DependencyProperty IsShowTitleBarProperty =
+        DependencyProperty.Register(nameof(IsShowTitleBar), typeof(bool), typeof(Window),
+            new PropertyMetadata(true, OnWindowTitleBarPresentationChanged));
+
+    /// <summary>
+    /// Identifies the IsShowMinimizeButton dependency property.
+    /// </summary>
+    public static readonly DependencyProperty IsShowMinimizeButtonProperty =
+        DependencyProperty.Register(nameof(IsShowMinimizeButton), typeof(bool), typeof(Window),
+            new PropertyMetadata(true, OnWindowTitleBarPresentationChanged));
+
+    /// <summary>
+    /// Identifies the IsShowMaximizeButton dependency property.
+    /// </summary>
+    public static readonly DependencyProperty IsShowMaximizeButtonProperty =
+        DependencyProperty.Register(nameof(IsShowMaximizeButton), typeof(bool), typeof(Window),
+            new PropertyMetadata(true, OnWindowTitleBarPresentationChanged));
+
+    /// <summary>
+    /// Identifies the IsShowCloseButton dependency property.
+    /// </summary>
+    public static readonly DependencyProperty IsShowCloseButtonProperty =
+        DependencyProperty.Register(nameof(IsShowCloseButton), typeof(bool), typeof(Window),
+            new PropertyMetadata(true, OnWindowTitleBarPresentationChanged));
+
+    /// <summary>
+    /// Identifies the TitleBarHeight dependency property.
+    /// </summary>
+    public static readonly DependencyProperty TitleBarHeightProperty =
+        DependencyProperty.Register(nameof(TitleBarHeight), typeof(double), typeof(Window),
+            new PropertyMetadata(DefaultTitleBarHeightDip, OnWindowTitleBarPresentationChanged));
+
+    /// <summary>
+    /// Identifies the WindowIcon dependency property.
+    /// </summary>
+    public static readonly DependencyProperty WindowIconProperty =
+        DependencyProperty.Register(nameof(WindowIcon), typeof(ImageSource), typeof(Window),
+            new PropertyMetadata(null, OnWindowTitleBarPresentationChanged));
 
     #endregion
 
@@ -197,6 +271,96 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
     }
 
     /// <summary>
+    /// Gets or sets the content rendered on the left side of the title bar.
+    /// </summary>
+    public FrameworkElement? LeftWindowCommands
+    {
+        get => (FrameworkElement?)GetValue(LeftWindowCommandsProperty);
+        set => SetValue(LeftWindowCommandsProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the content rendered on the right side of the title bar.
+    /// </summary>
+    public FrameworkElement? RightWindowCommands
+    {
+        get => (FrameworkElement?)GetValue(RightWindowCommandsProperty);
+        set => SetValue(RightWindowCommandsProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether the title bar icon is visible.
+    /// </summary>
+    public bool IsShowIcon
+    {
+        get => (bool)GetValue(IsShowIconProperty)!;
+        set => SetValue(IsShowIconProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether the title text is visible.
+    /// </summary>
+    public bool IsShowTitle
+    {
+        get => (bool)GetValue(IsShowTitleProperty)!;
+        set => SetValue(IsShowTitleProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether the custom title bar is visible.
+    /// </summary>
+    public bool IsShowTitleBar
+    {
+        get => (bool)GetValue(IsShowTitleBarProperty)!;
+        set => SetValue(IsShowTitleBarProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether the minimize button is visible.
+    /// </summary>
+    public bool IsShowMinimizeButton
+    {
+        get => (bool)GetValue(IsShowMinimizeButtonProperty)!;
+        set => SetValue(IsShowMinimizeButtonProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether the maximize button is visible.
+    /// </summary>
+    public bool IsShowMaximizeButton
+    {
+        get => (bool)GetValue(IsShowMaximizeButtonProperty)!;
+        set => SetValue(IsShowMaximizeButtonProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets whether the close button is visible.
+    /// </summary>
+    public bool IsShowCloseButton
+    {
+        get => (bool)GetValue(IsShowCloseButtonProperty)!;
+        set => SetValue(IsShowCloseButtonProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the height, in DIPs, of the custom title bar.
+    /// </summary>
+    public double TitleBarHeight
+    {
+        get => (double)GetValue(TitleBarHeightProperty)!;
+        set => SetValue(TitleBarHeightProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the icon displayed in the custom title bar.
+    /// </summary>
+    public ImageSource? WindowIcon
+    {
+        get => (ImageSource?)GetValue(WindowIconProperty);
+        set => SetValue(WindowIconProperty, value);
+    }
+
+    /// <summary>
     /// Gets or sets the window that owns this window.
     /// </summary>
     public Window? Owner { get; set; }
@@ -244,6 +408,7 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
     private readonly Dictionary<uint, PointerPoint> _lastPointerPoints = [];
     private readonly Dictionary<uint, PointerStylusDevice> _activeStylusDevices = [];
     private readonly Dictionary<uint, PointerManipulationSession> _activeManipulationSessions = [];
+    private readonly RealTimeStylus _realTimeStylus;
 
     /// <summary>
     /// External popup windows that are currently open and owned by this window.
@@ -261,7 +426,8 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         OverlayLayer = new OverlayLayer();
         AddVisualChild(OverlayLayer);
 
-        // Create custom title bar by default
+        _realTimeStylus = new RealTimeStylus(this);
+
         CreateTitleBar();
     }
 
@@ -297,10 +463,8 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
             return;
         }
 
-        TitleBar = new TitleBar
-        {
-            Title = Title
-        };
+        TitleBar = new TitleBar();
+        ApplyTitleBarPresentation();
 
         TitleBar.MinimizeClicked += OnTitleBarMinimizeClicked;
         TitleBar.MaximizeRestoreClicked += OnTitleBarMaximizeRestoreClicked;
@@ -319,6 +483,86 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
 
             RemoveVisualChild(TitleBar);
             TitleBar = null;
+        }
+    }
+
+    private void ApplyTitleBarPresentation()
+    {
+        EnsureAutoWindowIcon();
+
+        if (TitleBar == null)
+        {
+            return;
+        }
+
+        TitleBar.Height = GetEffectiveTitleBarHeightDip();
+        TitleBar.Title = Title;
+        TitleBar.IsMaximized = WindowState == WindowState.Maximized;
+        TitleBar.ShowMinimizeButton = IsShowMinimizeButton;
+        TitleBar.ShowMaximizeButton = IsShowMaximizeButton;
+        TitleBar.ShowCloseButton = IsShowCloseButton;
+        TitleBar.LeftWindowCommands = LeftWindowCommands;
+        TitleBar.RightWindowCommands = RightWindowCommands;
+        TitleBar.IsShowIcon = IsShowIcon;
+        TitleBar.IsShowTitle = IsShowTitle;
+        TitleBar.WindowIcon = WindowIcon;
+        TitleBar.Visibility = IsShowTitleBar ? Visibility.Visible : Visibility.Collapsed;
+
+        if (!IsShowTitleBar)
+        {
+            ClearTitleBarInteractionState();
+        }
+    }
+
+    private void ClearTitleBarInteractionState()
+    {
+        UpdateTitleBarButtonHover(null);
+        if (_pressedTitleBarButton != null)
+        {
+            _pressedTitleBarButton.SetIsPressed(false);
+            _pressedTitleBarButton = null;
+        }
+    }
+
+    private void EnsureAutoWindowIcon()
+    {
+        if (WindowIcon != null || _attemptedAutoWindowIcon)
+        {
+            return;
+        }
+
+        _attemptedAutoWindowIcon = true;
+        var icon = TryCreateDefaultWindowIcon();
+        if (icon != null)
+        {
+            SetValue(WindowIconProperty, icon);
+        }
+    }
+
+    private static ImageSource? TryCreateDefaultWindowIcon()
+    {
+        System.Drawing.Icon? icon = null;
+        try
+        {
+            var processPath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(processPath) && System.IO.File.Exists(processPath))
+            {
+                icon = System.Drawing.Icon.ExtractAssociatedIcon(processPath);
+            }
+
+            icon ??= (System.Drawing.Icon)System.Drawing.SystemIcons.Application.Clone();
+            using var bitmap = icon.ToBitmap();
+            using var stream = new System.IO.MemoryStream();
+            bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+            return BitmapImage.FromBytes(stream.ToArray());
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            icon?.Dispose();
         }
     }
 
@@ -364,23 +608,23 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         bool isMaximized = IsZoomed(Handle);
 
         // Convert screen coordinates to client-area coordinates (physical pixels).
-        // This correctly handles both normal and maximized windows because
-        // WM_NCCALCSIZE sets the client area to the full window rect (normal)
-        // or the monitor work area (maximized).
-        // Using ScreenToClient ensures coordinates match the layout coordinate system,
-        // which is critical for Windows 11 Snap Layout (requires accurate HTMAXBUTTON).
         POINT pt = new() { X = screenX, Y = screenY };
         _ = ScreenToClient(Handle, ref pt);
 
         // Convert to DIPs for comparison with layout values.
-        // Width/Height are set from WM_SIZE client area dimensions / DPI scale,
-        // so they match the client-area coordinate system used by ScreenToClient.
         double x = pt.X / _dpiScale;
         double y = pt.Y / _dpiScale;
+
+        return ComputeNcHitTestFromClientDip(x, y, isMaximized);
+    }
+
+    // Extracted for deterministic tests without a live HWND.
+    internal int ComputeNcHitTestFromClientDip(double x, double y, bool isMaximized)
+    {
         double windowWidth = Width;
         double windowHeight = Height;
 
-        var titleBarHeight = TitleBar?.DesiredSize.Height ?? 32;
+        var titleBarHeight = GetCurrentTitleBarHeightDip();
         bool canResize = !isMaximized &&
             (ResizeMode == ResizeMode.CanResize || ResizeMode == ResizeMode.CanResizeWithGrip);
         const int resizeBorder = 6;
@@ -392,14 +636,11 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
 
         if (canResize)
         {
-            // Check resize borders
             isLeft = x < resizeBorder;
             isRight = x >= windowWidth - resizeBorder;
             isTop = y < resizeBorder;
             isBottom = y >= windowHeight - resizeBorder;
 
-            // Resize borders should always win over title bar button hit tests.
-            // This matches native behavior near top/right edges around caption buttons.
             if (isTop && isLeft)
             {
                 return HTTOPLEFT;
@@ -441,24 +682,28 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
             }
         }
 
-        // Check title bar buttons.
-        // Return the appropriate hit test value for each button type.
-        if (y < titleBarHeight)
+        if (!IsTitleBarVisible())
         {
-            var button = GetTitleBarButtonAtPoint(new Point(x, y), windowWidth);
-            if (button != null)
-            {
-                return button.Kind switch
-                {
-                    TitleBarButtonKind.Minimize => HTMINBUTTON,
-                    TitleBarButtonKind.Maximize or TitleBarButtonKind.Restore => HTMAXBUTTON,
-                    TitleBarButtonKind.Close => HTCLOSE,
-                    _ => HTCLIENT
-                };
-            }
+            return HTCLIENT;
         }
 
-        // Check if in title bar area (caption, not buttons - buttons already handled above)
+        var button = GetTitleBarButtonAtPoint(new Point(x, y), windowWidth);
+        if (button != null)
+        {
+            return button.Kind switch
+            {
+                TitleBarButtonKind.Minimize => HTMINBUTTON,
+                TitleBarButtonKind.Maximize or TitleBarButtonKind.Restore => HTMAXBUTTON,
+                TitleBarButtonKind.Close => HTCLOSE,
+                _ => HTCLIENT
+            };
+        }
+
+        if (IsTitleBarWindowCommandsHit(new Point(x, y)))
+        {
+            return HTCLIENT;
+        }
+
         if (y < titleBarHeight)
         {
             return HTCAPTION;
@@ -467,83 +712,247 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         return HTCLIENT;
     }
 
-    private TitleBarButton? GetTitleBarButtonAtPoint(Point point, double windowWidth = 0)
+    private bool IsTitleBarVisible()
     {
+        return TitleBarStyle == WindowTitleBarStyle.Custom &&
+               IsShowTitleBar &&
+               TitleBar != null &&
+               TitleBar.Visibility == Visibility.Visible;
+    }
+
+    private double GetEffectiveTitleBarHeightDip()
+    {
+        double height = TitleBarHeight;
+        if (double.IsNaN(height) || double.IsInfinity(height) || height <= 0)
+        {
+            return DefaultTitleBarHeightDip;
+        }
+
+        return height;
+    }
+
+    private double GetCurrentTitleBarHeightDip()
+    {
+        if (!IsTitleBarVisible())
+        {
+            return 0;
+        }
+
         if (TitleBar == null)
         {
-            return null;
+            return GetEffectiveTitleBarHeightDip();
         }
 
-        var titleBarHeight = TitleBar.DesiredSize.Height;
-        if (point.Y >= titleBarHeight)
+        return GetElementHeightDip(TitleBar, GetEffectiveTitleBarHeightDip());
+    }
+
+    private bool IsTitleBarWindowCommandsHit(Point point)
+    {
+        if (!IsTitleBarVisible() || TitleBar == null)
+        {
+            return false;
+        }
+
+        var titleBarBounds = TitleBar.VisualBounds;
+        var localPoint = new Point(point.X - titleBarBounds.X, point.Y - titleBarBounds.Y);
+        return TitleBar.IsPointInWindowCommands(localPoint);
+    }
+
+    private TitleBarButton? GetTitleBarButtonAtPoint(Point point, double windowWidth = 0)
+    {
+        if (!IsTitleBarVisible() || TitleBar == null)
         {
             return null;
         }
 
-        var buttonWidth = 46.0;
-        // Use provided window width, or fall back to Width property
-        var titleBarWidth = windowWidth > 0 ? windowWidth : Width;
+        var titleBarBounds = TitleBar.VisualBounds;
+
+        // Convert to TitleBar-local coordinates so they can be compared with button VisualBounds.
+        var localPoint = new Point(point.X - titleBarBounds.X, point.Y - titleBarBounds.Y);
+
+        var closeButton = GetTitleBarButtonByKind(TitleBarButtonKind.Close);
+        if (IsTitleBarButtonHit(localPoint, closeButton))
+        {
+            return closeButton;
+        }
+
+        var maximizeButton = GetTitleBarButtonByKind(TitleBar.IsMaximized ? TitleBarButtonKind.Restore : TitleBarButtonKind.Maximize);
+        if (IsTitleBarButtonHit(localPoint, maximizeButton))
+        {
+            return maximizeButton;
+        }
+
+        var minimizeButton = GetTitleBarButtonByKind(TitleBarButtonKind.Minimize);
+        if (IsTitleBarButtonHit(localPoint, minimizeButton))
+        {
+            return minimizeButton;
+        }
+
+        // Fallback for cases before first arrange: use current button widths,
+        // not a hardcoded value, so hit-test math stays aligned with layout.
+        var titleBarWidth = windowWidth > 0
+            ? windowWidth
+            : (TitleBar.ActualWidth > 0 ? TitleBar.ActualWidth : Width);
+
+        return GetTitleBarButtonByWidthFallback(localPoint, titleBarWidth, closeButton, maximizeButton, minimizeButton);
+    }
+
+    private static bool IsTitleBarButtonHit(Point localPoint, TitleBarButton? button)
+    {
+        if (button == null || button.Visibility != Visibility.Visible)
+        {
+            return false;
+        }
+
+        var bounds = button.VisualBounds;
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return false;
+        }
+
+        // Use the largest known dimension so styled Width/Height can expand NC hit-testing
+        // even when layout is temporarily constrained to native caption metrics.
+        double width = Math.Max(bounds.Width, GetTitleBarButtonHitWidth(button));
+        double height = Math.Max(bounds.Height, GetTitleBarButtonHitHeight(button));
+
+        return localPoint.X >= bounds.X &&
+               localPoint.X < bounds.X + width &&
+               localPoint.Y >= bounds.Y &&
+               localPoint.Y < bounds.Y + height;
+    }
+
+    private TitleBarButton? GetTitleBarButtonByWidthFallback(
+        Point localPoint,
+        double titleBarWidth,
+        TitleBarButton? closeButton,
+        TitleBarButton? maximizeButton,
+        TitleBarButton? minimizeButton)
+    {
         double buttonX = titleBarWidth;
 
-        // Check close button (rightmost)
-        if (TitleBar.ShowCloseButton)
+        if (TitleBar!.ShowCloseButton && closeButton != null)
         {
-            buttonX -= buttonWidth;
-            if (point.X >= buttonX && point.X < buttonX + buttonWidth)
+            var closeWidth = GetTitleBarButtonHitWidth(closeButton);
+            var closeHeight = GetTitleBarButtonHitHeight(closeButton);
+            buttonX -= closeWidth;
+            if (localPoint.X >= buttonX && localPoint.X < buttonX + closeWidth &&
+                localPoint.Y >= 0 && localPoint.Y < closeHeight)
             {
-                return GetTitleBarButtonByKind(TitleBarButtonKind.Close);
+                return closeButton;
             }
         }
 
-        // Check maximize button
-        if (TitleBar.ShowMaximizeButton)
+        if (TitleBar.ShowMaximizeButton && maximizeButton != null)
         {
-            buttonX -= buttonWidth;
-            if (point.X >= buttonX && point.X < buttonX + buttonWidth)
+            var maximizeWidth = GetTitleBarButtonHitWidth(maximizeButton);
+            var maximizeHeight = GetTitleBarButtonHitHeight(maximizeButton);
+            buttonX -= maximizeWidth;
+            if (localPoint.X >= buttonX && localPoint.X < buttonX + maximizeWidth &&
+                localPoint.Y >= 0 && localPoint.Y < maximizeHeight)
             {
-                return GetTitleBarButtonByKind(TitleBar.IsMaximized ? TitleBarButtonKind.Restore : TitleBarButtonKind.Maximize);
+                return maximizeButton;
             }
         }
 
-        // Check minimize button
-        if (TitleBar.ShowMinimizeButton)
+        if (TitleBar.ShowMinimizeButton && minimizeButton != null)
         {
-            buttonX -= buttonWidth;
-            if (point.X >= buttonX && point.X < buttonX + buttonWidth)
+            var minimizeWidth = GetTitleBarButtonHitWidth(minimizeButton);
+            var minimizeHeight = GetTitleBarButtonHitHeight(minimizeButton);
+            buttonX -= minimizeWidth;
+            if (localPoint.X >= buttonX && localPoint.X < buttonX + minimizeWidth &&
+                localPoint.Y >= 0 && localPoint.Y < minimizeHeight)
             {
-                return GetTitleBarButtonByKind(TitleBarButtonKind.Minimize);
+                return minimizeButton;
             }
         }
 
         return null;
     }
 
-    private TitleBarButton? GetTitleBarButtonByKind(TitleBarButtonKind kind)
+    private static double GetTitleBarButtonHitWidth(TitleBarButton button)
     {
-        if (TitleBar == null)
+        double width = 0;
+
+        if (button.ActualWidth > 0)
         {
-            return null;
+            width = Math.Max(width, button.ActualWidth);
         }
 
-        for (int i = 0; i < TitleBar.VisualChildrenCount; i++)
+        if (button.DesiredSize.Width > 0)
         {
-            if (TitleBar.GetVisualChild(i) is TitleBarButton button)
-            {
-                if (button.Kind == kind || (kind == TitleBarButtonKind.Restore && button.Kind == TitleBarButtonKind.Maximize))
-                {
-                    return button;
-                }
-            }
+            width = Math.Max(width, button.DesiredSize.Width);
         }
-        return null;
+
+        if (!double.IsNaN(button.Width) && button.Width > 0)
+        {
+            width = Math.Max(width, button.Width);
+        }
+
+        return width > 0 ? width : 46.0;
+    }
+
+    private static double GetTitleBarButtonHitHeight(TitleBarButton button)
+    {
+        double height = 0;
+
+        if (button.ActualHeight > 0)
+        {
+            height = Math.Max(height, button.ActualHeight);
+        }
+
+        if (button.DesiredSize.Height > 0)
+        {
+            height = Math.Max(height, button.DesiredSize.Height);
+        }
+
+        if (!double.IsNaN(button.Height) && button.Height > 0)
+        {
+            height = Math.Max(height, button.Height);
+        }
+
+        return height > 0 ? height : DefaultTitleBarHeightDip;
+    }
+
+    private TitleBarButton? GetTitleBarButtonByKind(TitleBarButtonKind kind)
+    {
+        return TitleBar?.GetButtonByKind(kind);
+    }
+
+    private TitleBarButton? GetTitleBarButtonByNcHit(int hitTest)
+    {
+        return hitTest switch
+        {
+            HTMINBUTTON => GetTitleBarButtonByKind(TitleBarButtonKind.Minimize),
+            HTMAXBUTTON => GetTitleBarButtonByKind(TitleBar?.IsMaximized == true ? TitleBarButtonKind.Restore : TitleBarButtonKind.Maximize),
+            HTCLOSE => GetTitleBarButtonByKind(TitleBarButtonKind.Close),
+            _ => null
+        };
+    }
+
+    private static bool IsNcHitMatchingButtonKind(int hitTest, TitleBarButtonKind kind)
+    {
+        return (hitTest == HTMINBUTTON && kind == TitleBarButtonKind.Minimize) ||
+               (hitTest == HTMAXBUTTON && (kind == TitleBarButtonKind.Maximize || kind == TitleBarButtonKind.Restore)) ||
+               (hitTest == HTCLOSE && kind == TitleBarButtonKind.Close);
+    }
+
+    private static bool IsCaptionButtonNcHit(int hitTest)
+    {
+        return hitTest == HTMINBUTTON || hitTest == HTMAXBUTTON || hitTest == HTCLOSE;
     }
 
     private TitleBarButton? _hoveredTitleBarButton;
     private TitleBarButton? _pressedTitleBarButton;
 
-    private bool OnNcMouseMove(nint wParam, nint lParam)
+    private void OnNcMouseMove(nint wParam, nint lParam)
     {
-        int hitTest = (int)wParam.ToInt64();
+        _ = wParam;
+
+        if (!IsTitleBarVisible())
+        {
+            UpdateTitleBarButtonHover(null);
+            return;
+        }
 
         // Get cursor position in screen coordinates (physical pixels)
         int x = (short)(lParam.ToInt64() & 0xFFFF);
@@ -553,41 +962,240 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         POINT pt = new() { X = x, Y = y };
         _ = ScreenToClient(Handle, ref pt);
 
-        // Only treat hover as a title bar button when NC hit test is actually on a button.
-        var button = IsTitleBarButtonHitTest(hitTest)
-            ? GetTitleBarButtonAtPoint(new Point(pt.X / _dpiScale, pt.Y / _dpiScale))
-            : null;
+        var button = GetTitleBarButtonAtPoint(new Point(pt.X / _dpiScale, pt.Y / _dpiScale));
         UpdateTitleBarButtonHover(button);
 
         // Track non-client mouse leave
         TRACKMOUSEEVENT tme = new()
         {
             cbSize = (uint)Marshal.SizeOf<TRACKMOUSEEVENT>(),
-            dwFlags = TME_LEAVE | TME_NONCLIENT,
+            dwFlags = TME_LEAVE | TME_HOVER | TME_NONCLIENT,
             hwndTrack = Handle,
-            dwHoverTime = 0
+            dwHoverTime = HOVER_DEFAULT
         };
         _ = TrackMouseEvent(ref tme);
 
-        // Always return false to let Windows handle the message
-        // This allows Snap Layout flyout on Windows 11 to appear
-        // We still update our visual hover state above
-        return false;
+        // Let DWM/DefWindowProc continue processing NC mouse move for Snap state machine.
     }
 
     private void OnNcMouseLeave()
     {
         UpdateTitleBarButtonHover(null);
-        _pressedTitleBarButton = null;
+    }
+
+    private bool TryInjectSnapProxyNcMouseMessage(uint msg, nint lParam)
+    {
+        _ = msg;
+        _ = lParam;
+        // Disabled: synthetic NC proxy routing proved unstable
+        // (button click regressions and resize jitter) and did not reliably
+        // improve Snap flyout behavior across custom caption geometries.
+        return false;
+    }
+
+    private bool TryBuildMaxButtonProxyLParam(
+        nint lParam,
+        out nint proxyLParam,
+        out (int x, int y) realScreenPoint,
+        out (int x, int y) proxyScreenPoint)
+    {
+        proxyLParam = nint.Zero;
+        realScreenPoint = default;
+        proxyScreenPoint = default;
+
+        if (!ShouldUseWin11SnapNcRouting() || Handle == nint.Zero)
+        {
+            return false;
+        }
+
+        realScreenPoint = UnpackScreenPointFromLParam(lParam);
+        if (!TryGetCustomMaxButtonScreenBounds(out var customMaxRect) ||
+            !ContainsPoint(customMaxRect, realScreenPoint))
+        {
+            return false;
+        }
+
+        if (!TryGetDwmMaxButtonBounds(out var dwmMaxRect) ||
+            !TryBuildMaxButtonProxyScreenPoint(realScreenPoint, customMaxRect, dwmMaxRect, out proxyScreenPoint))
+        {
+            return false;
+        }
+
+        proxyLParam = PackScreenPointToLParam(proxyScreenPoint);
+        return true;
+    }
+
+#if DEBUG
+    private (int x, int y)? _lastLoggedProxyRealPoint;
+    private (int x, int y)? _lastLoggedProxyPoint;
+    private long _lastLoggedProxyTick;
+
+    private void LogSnapProxy((int x, int y) realScreenPoint, (int x, int y) proxyScreenPoint)
+    {
+        long now = Environment.TickCount64;
+        bool isRepeatedPoint = _lastLoggedProxyRealPoint == realScreenPoint &&
+                               _lastLoggedProxyPoint == proxyScreenPoint;
+        if (isRepeatedPoint && now - _lastLoggedProxyTick < 200)
+        {
+            return;
+        }
+
+        _lastLoggedProxyRealPoint = realScreenPoint;
+        _lastLoggedProxyPoint = proxyScreenPoint;
+        _lastLoggedProxyTick = now;
+        Debug.WriteLine($"[SnapDebug] ProxySnap: real({realScreenPoint.x},{realScreenPoint.y})->proxy({proxyScreenPoint.x},{proxyScreenPoint.y})");
+    }
+#endif
+
+    private bool TryGetDwmMaxButtonBounds(out (int left, int top, int right, int bottom) dwmMaxRect)
+    {
+        dwmMaxRect = default;
+        if (!TryGetDwmCaptionButtonBounds(Handle, out var captionBounds))
+        {
+            return false;
+        }
+
+        bool showMinimize = TitleBar?.ShowMinimizeButton ?? true;
+        bool showMaximize = TitleBar?.ShowMaximizeButton ?? true;
+        bool showClose = TitleBar?.ShowCloseButton ?? true;
+        return TryGetDwmMaxButtonBounds(captionBounds, showMinimize, showMaximize, showClose, out dwmMaxRect);
+    }
+
+    private bool TryGetCustomMaxButtonScreenBounds(out (int left, int top, int right, int bottom) customMaxRect)
+    {
+        customMaxRect = default;
+        if (Handle == nint.Zero || TitleBarStyle != WindowTitleBarStyle.Custom || TitleBar == null)
+        {
+            return false;
+        }
+
+        var maxButton = GetTitleBarButtonByKind(TitleBar.IsMaximized ? TitleBarButtonKind.Restore : TitleBarButtonKind.Maximize);
+        if (!TryGetCustomMaxButtonClientBoundsDip(maxButton, out var customMaxClientRectDip))
+        {
+            return false;
+        }
+
+        POINT clientOrigin = new() { X = 0, Y = 0 };
+        if (!ClientToScreen(Handle, ref clientOrigin))
+        {
+            return false;
+        }
+
+        return TryGetCustomMaxButtonScreenBounds(customMaxClientRectDip, _dpiScale, (clientOrigin.X, clientOrigin.Y), out customMaxRect);
+    }
+
+    private bool TryGetCustomMaxButtonClientBoundsDip(
+        TitleBarButton? maxButton,
+        out (double left, double top, double right, double bottom) clientRect)
+    {
+        clientRect = default;
+        if (TitleBar == null || maxButton == null || maxButton.Visibility != Visibility.Visible)
+        {
+            return false;
+        }
+
+        var titleBarBounds = TitleBar.VisualBounds;
+        var buttonBounds = maxButton.VisualBounds;
+        double left;
+        double top;
+        double width;
+        double height;
+
+        if (buttonBounds.Width > 0 && buttonBounds.Height > 0)
+        {
+            left = titleBarBounds.X + buttonBounds.X;
+            top = titleBarBounds.Y + buttonBounds.Y;
+            width = buttonBounds.Width;
+            height = buttonBounds.Height;
+        }
+        else
+        {
+            double titleBarWidth = TitleBar.ActualWidth > 0
+                ? TitleBar.ActualWidth
+                : (TitleBar.DesiredSize.Width > 0 ? TitleBar.DesiredSize.Width : Width);
+            if (titleBarWidth <= 0)
+            {
+                return false;
+            }
+
+            double buttonX = titleBarBounds.X + titleBarWidth;
+            if (TitleBar.ShowCloseButton)
+            {
+                var closeButton = GetTitleBarButtonByKind(TitleBarButtonKind.Close);
+                if (closeButton != null && closeButton.Visibility == Visibility.Visible)
+                {
+                    buttonX -= GetTitleBarButtonHitWidth(closeButton);
+                }
+            }
+
+            width = GetTitleBarButtonHitWidth(maxButton);
+            height = GetTitleBarButtonHitHeight(maxButton);
+            buttonX -= width;
+            left = buttonX;
+            top = titleBarBounds.Y;
+        }
+
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        clientRect = (left, top, left + width, top + height);
+        return true;
+    }
+
+    private static (int x, int y) UnpackScreenPointFromLParam(nint lParam)
+    {
+        int x = (short)(lParam.ToInt64() & 0xFFFF);
+        int y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+        return (x, y);
+    }
+
+    private static nint PackScreenPointToLParam((int x, int y) point)
+    {
+        ushort x = unchecked((ushort)(short)point.x);
+        ushort y = unchecked((ushort)(short)point.y);
+        int packed = x | (y << 16);
+        return new nint(packed);
+    }
+
+    private static bool ContainsPoint((int left, int top, int right, int bottom) rect, (int x, int y) point)
+    {
+        return point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom;
     }
 
     private bool OnNcLButtonDown(nint wParam, nint lParam)
     {
-        int hitTest = (int)wParam.ToInt64();
+        if (!IsTitleBarVisible())
+        {
+            return false;
+        }
 
-        // Important: let Windows handle resize/caption hit tests.
-        // Otherwise top-right corner resize gets swallowed by button handling.
-        if (!IsTitleBarButtonHitTest(hitTest))
+        // Use actual pointer position instead of relying on wParam hit-test.
+        // During/after resize, NC hit-test values can drift while the button
+        // geometry is still correct, which leads to hover working but clicks ignored.
+        int x = (short)(lParam.ToInt64() & 0xFFFF);
+        int y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
+        POINT pt = new() { X = x, Y = y };
+        _ = ScreenToClient(Handle, ref pt);
+
+        int hitTest = (int)wParam.ToInt64();
+        var button = GetTitleBarButtonAtPoint(new Point(pt.X / _dpiScale, pt.Y / _dpiScale)) ??
+                     GetTitleBarButtonByNcHit(hitTest);
+        if (button == null)
+        {
+            // Not on a custom caption button: let Windows handle caption drag/resize.
+            return false;
+        }
+
+        _pressedTitleBarButton = button;
+        button.SetIsPressed(true);  // triggers InvalidateVisual() → dirty rect
+        return true;
+    }
+
+    private bool OnNcLButtonUp(nint wParam, nint lParam)
+    {
+        if (!IsTitleBarVisible())
         {
             return false;
         }
@@ -598,33 +1206,18 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         POINT pt = new() { X = x, Y = y };
         _ = ScreenToClient(Handle, ref pt);
 
-        var button = GetTitleBarButtonAtPoint(new Point(pt.X / _dpiScale, pt.Y / _dpiScale));
-        if (button != null)
-        {
-            _pressedTitleBarButton = button;
-            button.SetIsPressed(true);  // triggers InvalidateVisual() → dirty rect
-            return true; // Handled
-        }
-
-        return false; // Let Windows handle it (for dragging)
-    }
-
-    private bool OnNcLButtonUp(nint wParam, nint lParam)
-    {
-        // Get cursor position (physical pixels) → client → DIPs
-        int x = (short)(lParam.ToInt64() & 0xFFFF);
-        int y = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
-        POINT pt = new() { X = x, Y = y };
-        _ = ScreenToClient(Handle, ref pt);
-
-        var button = GetTitleBarButtonAtPoint(new Point(pt.X / _dpiScale, pt.Y / _dpiScale));
+        int hitTest = (int)wParam.ToInt64();
+        var button = GetTitleBarButtonAtPoint(new Point(pt.X / _dpiScale, pt.Y / _dpiScale)) ??
+                     GetTitleBarButtonByNcHit(hitTest);
 
         if (_pressedTitleBarButton != null)
         {
             _pressedTitleBarButton.SetIsPressed(false);
 
             // If released on the same button, trigger click
-            if (button == _pressedTitleBarButton)
+            bool isReleaseOnPressedButton = button == _pressedTitleBarButton ||
+                                            (button == null && IsNcHitMatchingButtonKind(hitTest, _pressedTitleBarButton.Kind));
+            if (isReleaseOnPressedButton)
             {
                 switch (_pressedTitleBarButton.Kind)
                 {
@@ -651,17 +1244,12 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
 
     private bool OnNcLButtonDblClk(nint wParam, nint lParam)
     {
-        int hitTest = (int)wParam.ToInt64();
-
-        if (IsTitleBarButtonHitTest(hitTest))
-        {
-            return true;
-        }
-
-        if (hitTest != HTCAPTION)
+        if (!IsTitleBarVisible())
         {
             return false;
         }
+
+        int hitTest = (int)wParam.ToInt64();
 
         // Get cursor position (physical pixels) → client → DIPs
         int x = (short)(lParam.ToInt64() & 0xFFFF);
@@ -669,11 +1257,16 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         POINT pt = new() { X = x, Y = y };
         _ = ScreenToClient(Handle, ref pt);
 
-        // If over a button, don't handle double-click (let the button clicks work)
+        // If over a button, don't handle double-click as caption maximize.
         var button = GetTitleBarButtonAtPoint(new Point(pt.X / _dpiScale, pt.Y / _dpiScale));
         if (button != null)
         {
-            return true; // Prevent default handling
+            return true;
+        }
+
+        if (hitTest != HTCAPTION)
+        {
+            return false;
         }
 
         // Double-click on title bar (caption area) to maximize/restore
@@ -684,11 +1277,6 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         }
 
         return false;
-    }
-
-    private static bool IsTitleBarButtonHitTest(int hitTest)
-    {
-        return hitTest == HTMINBUTTON || hitTest == HTMAXBUTTON || hitTest == HTCLOSE;
     }
 
     private void UpdateTitleBarButtonHover(TitleBarButton? newHoveredButton)
@@ -755,10 +1343,11 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         double titleBarHeight = 0;
 
         // Measure title bar
-        if (TitleBar != null)
+        if (IsTitleBarVisible() && TitleBar != null)
         {
-            TitleBar.Measure(new Size(availableSize.Width, double.PositiveInfinity));
-            titleBarHeight = TitleBar.DesiredSize.Height;
+            double effectiveTitleBarHeight = GetEffectiveTitleBarHeightDip();
+            TitleBar.Measure(new Size(availableSize.Width, effectiveTitleBarHeight));
+            titleBarHeight = GetElementHeightDip(TitleBar, effectiveTitleBarHeight);
         }
 
         // Measure content with remaining space
@@ -783,9 +1372,9 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         double titleBarHeight = 0;
 
         // Arrange title bar at top
-        if (TitleBar != null)
+        if (IsTitleBarVisible() && TitleBar != null)
         {
-            titleBarHeight = TitleBar.DesiredSize.Height;
+            titleBarHeight = GetCurrentTitleBarHeightDip();
             Rect titleBarRect = new(0, 0, finalSize.Width, titleBarHeight);
             TitleBar.Arrange(titleBarRect);
             // Note: Do NOT call SetVisualBounds here - ArrangeCore already handles margin
@@ -806,6 +1395,9 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
 
         // Arrange overlay layer over the full window area
         OverlayLayer.Arrange(new Rect(0, 0, finalSize.Width, finalSize.Height));
+
+        // Keep DWM non-client hover tracking region aligned with current title bar/button geometry.
+        UpdateCustomTitleBarFrameMargins();
 
         return finalSize;
     }
@@ -993,9 +1585,9 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         // Register window class if needed
         RegisterWindowClass();
 
-        // Determine window style based on TitleBarStyle
-        // Use WS_OVERLAPPEDWINDOW for both - we handle the non-client area in WM_NCCALCSIZE
-        uint dwStyle = WS_OVERLAPPEDWINDOW;
+        // Determine window style based on TitleBarStyle.
+        // Keep standard caption style bits; custom visual caption is removed via NCCALCSIZE.
+        uint dwStyle = GetWindowStyleForTitleBarStyle(TitleBarStyle);
 
         uint dwExStyle = TitleBarStyle == WindowTitleBarStyle.Custom
             ? WS_EX_APPWINDOW
@@ -1049,12 +1641,14 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOOWNERZORDER);
         }
 
-        // For custom title bar, enable DWM effects for rounded corners and animations
-        // Keep WS_OVERLAPPEDWINDOW (including WS_CAPTION) - the native title bar will
-        // disappear after the first resize/maximize due to WM_NCCALCSIZE handling
+        // For custom title bar, enable DWM effects for rounded corners and animations.
         if (TitleBarStyle == WindowTitleBarStyle.Custom)
         {
             EnableRoundedCorners();
+            // Ensure NC metrics are applied immediately so custom NCCALCSIZE
+            // semantics are active on the first displayed frame.
+            _ = SetWindowPos(Handle, nint.Zero, 0, 0, 0, 0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
         }
 
         // Create render target for this window
@@ -1079,17 +1673,72 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         int cornerPreference = DWMWCP_ROUND;
         _ = DwmSetWindowAttribute(Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPreference, sizeof(int));
 
-        // Extend frame into client area covering the title bar height.
-        // The top margin must be large enough for DwmDefWindowProc to handle
-        // WM_NCMOUSEMOVE within the title bar area. This is required for
-        // Windows 11 Snap Layout: DWM only tracks hover state within the
-        // extended frame region. With Top=1, DWM ignored the maximize button
-        // hover and Snap Layout only worked when maximized.
-        // Our rendering pipeline draws on top of DWM's system caption buttons,
-        // so they are not visible.
-        int titleBarPhysical = Math.Max((int)(32 * _dpiScale), 1);
+        // Extend frame into client area covering the effective title bar/button hit-test height.
+        UpdateCustomTitleBarFrameMargins();
+    }
+
+    private void UpdateCustomTitleBarFrameMargins()
+    {
+        if (Handle == nint.Zero || TitleBarStyle != WindowTitleBarStyle.Custom)
+        {
+            return;
+        }
+
+        int titleBarPhysical = GetCustomTitleBarTopMarginPhysical();
+        if (_appliedDwmTopMarginPhysical == titleBarPhysical)
+        {
+            return;
+        }
+
         MARGINS margins = new() { Left = 0, Right = 0, Top = titleBarPhysical, Bottom = 0 };
         _ = DwmExtendFrameIntoClientArea(Handle, ref margins);
+        _appliedDwmTopMarginPhysical = titleBarPhysical;
+    }
+
+    private int GetCustomTitleBarTopMarginPhysical()
+    {
+        if (!IsTitleBarVisible())
+        {
+            return 0;
+        }
+
+        double titleBarHeightDip = GetEffectiveTitleBarHeightDip();
+        if (TitleBar != null)
+        {
+            titleBarHeightDip = GetElementHeightDip(TitleBar, titleBarHeightDip);
+
+            // DWM hover tracking must include oversized caption buttons as well,
+            // otherwise Snap only appears inside the old top margin.
+            foreach (var button in TitleBar.EnumerateButtons())
+            {
+                if (button.Visibility == Visibility.Visible)
+                {
+                    titleBarHeightDip = Math.Max(titleBarHeightDip, GetElementHeightDip(button, titleBarHeightDip));
+                }
+            }
+        }
+
+        return Math.Max((int)Math.Ceiling(titleBarHeightDip * _dpiScale), 1);
+    }
+
+    private static double GetElementHeightDip(FrameworkElement element, double fallback)
+    {
+        if (element.ActualHeight > 0)
+        {
+            return element.ActualHeight;
+        }
+
+        if (element.DesiredSize.Height > 0)
+        {
+            return element.DesiredSize.Height;
+        }
+
+        if (!double.IsNaN(element.Height) && element.Height > 0)
+        {
+            return element.Height;
+        }
+
+        return fallback;
     }
 
     private void ApplySystemBackdrop(WindowBackdropType backdropType)
@@ -1108,9 +1757,7 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
             // Restore frame extension covering title bar for Snap Layout support
             if (TitleBarStyle == WindowTitleBarStyle.Custom)
             {
-                int titleBarPhysical = Math.Max((int)(32 * _dpiScale), 1);
-                MARGINS margins = new() { Left = 0, Right = 0, Top = titleBarPhysical, Bottom = 0 };
-                _ = DwmExtendFrameIntoClientArea(Handle, ref margins);
+                UpdateCustomTitleBarFrameMargins();
             }
 
             RequestFullInvalidation();
@@ -1198,20 +1845,41 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
             return;
         }
 
+        long style = GetWindowLong(Handle, GWL_STYLE);
         long exStyle = GetWindowLong(Handle, GWL_EXSTYLE);
 
         if (TitleBarStyle == WindowTitleBarStyle.Custom)
         {
-            // Keep WS_OVERLAPPEDWINDOW but add WS_EX_APPWINDOW
+            // Keep WS_CAPTION so the OS preserves native caption semantics
+            // (Snap, system menu, NC button behavior). We remove the visual
+            // caption in WM_NCCALCSIZE instead.
+            style |= WS_CAPTION;
             exStyle |= WS_EX_APPWINDOW;
             EnableRoundedCorners();
         }
+        else
+        {
+            style |= WS_CAPTION;
+        }
 
+        _ = SetWindowLong(Handle, GWL_STYLE, style);
         _ = SetWindowLong(Handle, GWL_EXSTYLE, exStyle);
 
         // Force window to redraw with new style
         _ = SetWindowPos(Handle, nint.Zero, 0, 0, 0, 0,
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+    }
+
+    private static uint GetWindowStyleForTitleBarStyle(WindowTitleBarStyle titleBarStyle)
+    {
+        if (titleBarStyle == WindowTitleBarStyle.Custom)
+        {
+            // Keep the standard overlapped styles (including WS_CAPTION).
+            // Custom rendering still removes the visible caption via NCCALCSIZE.
+            return WS_OVERLAPPEDWINDOW;
+        }
+
+        return WS_OVERLAPPEDWINDOW;
     }
 
     private void EnsureRenderTarget()
@@ -1253,6 +1921,75 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         }
     }
 
+    /// <summary>
+    /// Ensures this window uses a composition render target that can host external visuals (for WebView composition controller).
+    /// Recreates the render target if needed.
+    /// </summary>
+    internal bool EnsureCompositionRenderTargetForEmbeddedContent()
+    {
+        if (Handle == nint.Zero)
+            return false;
+
+        EnsureRenderTarget();
+        if (RenderTarget == null || !RenderTarget.IsValid)
+            return false;
+
+        // Fast path: already supports composition child visuals.
+        if (RenderTarget.TryCreateWebViewCompositionVisual(out var existingVisual) && existingVisual != nint.Zero)
+        {
+            RenderTarget.DestroyWebViewCompositionVisual(existingVisual);
+            return true;
+        }
+
+        try
+        {
+            var context = RenderContext.Current;
+            if (context == null || !context.IsValid)
+            {
+                context = new RenderContext(RenderBackend.D3D12);
+            }
+
+            // Ensure composition-compatible window style for composition swap chain hosting.
+            long exStyle = GetWindowLong(Handle, GWL_EXSTYLE);
+            if ((exStyle & WS_EX_NOREDIRECTIONBITMAP) == 0)
+            {
+                _ = SetWindowLong(Handle, GWL_EXSTYLE, exStyle | WS_EX_NOREDIRECTIONBITMAP);
+                _ = SetWindowPos(Handle, nint.Zero, 0, 0, 0, 0,
+                    SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
+            }
+
+            var oldRenderTarget = RenderTarget;
+            RenderTarget = null;
+            oldRenderTarget?.Dispose();
+
+            int widthDip = ActualWidth > 0 ? (int)Math.Ceiling(ActualWidth) : (int)Math.Ceiling(Width);
+            int heightDip = ActualHeight > 0 ? (int)Math.Ceiling(ActualHeight) : (int)Math.Ceiling(Height);
+            int physicalWidth = Math.Max(1, (int)Math.Ceiling(widthDip * _dpiScale));
+            int physicalHeight = Math.Max(1, (int)Math.Ceiling(heightDip * _dpiScale));
+
+            RenderTarget = context.CreateRenderTargetForComposition(Handle, physicalWidth, physicalHeight);
+
+            float dpi = (float)(_dpiScale * 96.0);
+            RenderTarget.SetDpi(dpi, dpi);
+
+            // Rebind drawing context to the new native render target instance.
+            _drawingContext = null;
+            ForceRenderFrame();
+
+            if (RenderTarget.TryCreateWebViewCompositionVisual(out var visualAfterSwitch) && visualAfterSwitch != nint.Zero)
+            {
+                RenderTarget.DestroyWebViewCompositionVisual(visualAfterSwitch);
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Window] Failed to switch render target to composition mode: {ex.Message}");
+        }
+
+        return false;
+    }
+
     #region Property Changed Callbacks
 
     private static void OnTitleChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -1264,8 +2001,7 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                 _ = SetWindowText(window.Handle, (string?)e.NewValue ?? "");
             }
 
-            // Update title bar if using custom style
-            _ = window.TitleBar?.Title = (string?)e.NewValue ?? "";
+            window.ApplyTitleBarPresentation();
         }
     }
 
@@ -1273,10 +2009,7 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
     {
         if (d is Window window && e.NewValue is WindowState newState)
         {
-            if (window.TitleBar != null)
-            {
-                window.TitleBar.IsMaximized = newState == WindowState.Maximized;
-            }
+            window.ApplyTitleBarPresentation();
 
             // Sync the native window state when set programmatically.
             // Skip if we're already syncing from WM_SIZE to avoid infinite loop.
@@ -1313,7 +2046,9 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                 window.UpdateWindowStyle();
             }
 
+            window.ApplyTitleBarPresentation();
             window.InvalidateMeasure();
+            window.UpdateCustomTitleBarFrameMargins();
         }
     }
 
@@ -1335,6 +2070,23 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
             _ = SetWindowPos(window.Handle, insertAfter, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
+    }
+
+    private static void OnWindowTitleBarPresentationChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not Window window)
+        {
+            return;
+        }
+
+        if (e.Property == WindowIconProperty && e.NewValue == null)
+        {
+            window._attemptedAutoWindowIcon = false;
+        }
+
+        window.ApplyTitleBarPresentation();
+        window.InvalidateMeasure();
+        window.UpdateCustomTitleBarFrameMargins();
     }
 
     #endregion
@@ -1454,6 +2206,218 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
     protected virtual bool CanOpenDevTools => true;
 #endif
 
+    internal static (int left, int top, int right, int bottom) ComputeCustomNcCalcSizeRect(
+        (int left, int top, int right, int bottom) originalRect,
+        (int left, int top, int right, int bottom) defClientRect,
+        bool isMaximized,
+        (int left, int top, int right, int bottom)? workAreaRect)
+    {
+        if (isMaximized && workAreaRect.HasValue)
+        {
+            return workAreaRect.Value;
+        }
+
+        if (!IsValidRect(defClientRect))
+        {
+            return originalRect;
+        }
+
+        // ControlzEx-style NCCALCSIZE behavior:
+        // keep DefWindowProc's side/bottom frame math, but restore original top
+        // so the visual system caption is removed while preserving NC semantics.
+        return (defClientRect.left, originalRect.top, defClientRect.right, defClientRect.bottom);
+    }
+
+    internal static bool TryGetDwmCaptionButtonBounds(
+        nint hwnd,
+        out (int left, int top, int right, int bottom) captionBounds)
+    {
+        captionBounds = default;
+        if (hwnd == nint.Zero)
+        {
+            return false;
+        }
+
+        int hr = DwmGetWindowAttribute(hwnd, DWMWA_CAPTION_BUTTON_BOUNDS, out RECT rect, Marshal.SizeOf<RECT>());
+        if (hr != 0)
+        {
+            return false;
+        }
+
+        // DWMWA_CAPTION_BUTTON_BOUNDS is window-relative; convert to screen coordinates
+        // so it can be mapped against WM_NC* lParam points (also screen coordinates).
+        if (!GetWindowRect(hwnd, out RECT windowRect))
+        {
+            return false;
+        }
+
+        var bounds = (
+            rect.left + windowRect.left,
+            rect.top + windowRect.top,
+            rect.right + windowRect.left,
+            rect.bottom + windowRect.top);
+
+        if (!IsValidRect(bounds))
+        {
+            return false;
+        }
+
+        captionBounds = bounds;
+        return true;
+    }
+
+    internal static bool TryGetDwmMaxButtonBounds(
+        (int left, int top, int right, int bottom) captionBounds,
+        bool showMinimizeButton,
+        bool showMaximizeButton,
+        bool showCloseButton,
+        out (int left, int top, int right, int bottom) maxButtonBounds)
+    {
+        maxButtonBounds = default;
+        if (!showMaximizeButton || !IsValidRect(captionBounds))
+        {
+            return false;
+        }
+
+        int visibleCount = (showMinimizeButton ? 1 : 0) + (showMaximizeButton ? 1 : 0) + (showCloseButton ? 1 : 0);
+        if (visibleCount <= 0)
+        {
+            return false;
+        }
+
+        double totalWidth = captionBounds.right - captionBounds.left;
+        double buttonWidth = totalWidth / visibleCount;
+        if (buttonWidth <= 0)
+        {
+            return false;
+        }
+
+        double maxLeft = showMinimizeButton
+            ? captionBounds.left + buttonWidth
+            : captionBounds.left;
+        double maxRight = maxLeft + buttonWidth;
+
+        int left = Math.Clamp((int)Math.Floor(maxLeft), captionBounds.left, captionBounds.right - 1);
+        int right = Math.Clamp((int)Math.Ceiling(maxRight), left + 1, captionBounds.right);
+        maxButtonBounds = (left, captionBounds.top, right, captionBounds.bottom);
+        return IsValidRect(maxButtonBounds);
+    }
+
+    internal static bool TryGetCustomMaxButtonScreenBounds(
+        (double left, double top, double right, double bottom) customMaxClientRectDip,
+        double dpiScale,
+        (int x, int y) clientOriginScreenPoint,
+        out (int left, int top, int right, int bottom) customMaxScreenRect)
+    {
+        customMaxScreenRect = default;
+        if (dpiScale <= 0)
+        {
+            return false;
+        }
+
+        double widthDip = customMaxClientRectDip.right - customMaxClientRectDip.left;
+        double heightDip = customMaxClientRectDip.bottom - customMaxClientRectDip.top;
+        if (widthDip <= 0 || heightDip <= 0)
+        {
+            return false;
+        }
+
+        int left = clientOriginScreenPoint.x + (int)Math.Floor(customMaxClientRectDip.left * dpiScale);
+        int top = clientOriginScreenPoint.y + (int)Math.Floor(customMaxClientRectDip.top * dpiScale);
+        int right = clientOriginScreenPoint.x + (int)Math.Ceiling(customMaxClientRectDip.right * dpiScale);
+        int bottom = clientOriginScreenPoint.y + (int)Math.Ceiling(customMaxClientRectDip.bottom * dpiScale);
+        customMaxScreenRect = (left, top, right, bottom);
+        return IsValidRect(customMaxScreenRect);
+    }
+
+    internal static bool TryBuildMaxButtonProxyScreenPoint(
+        (int x, int y) realScreenPoint,
+        (int left, int top, int right, int bottom) customMaxRect,
+        (int left, int top, int right, int bottom) dwmMaxRect,
+        out (int x, int y) proxyScreenPoint)
+    {
+        proxyScreenPoint = default;
+        if (!IsValidRect(customMaxRect) || !IsValidRect(dwmMaxRect))
+        {
+            return false;
+        }
+
+        int safeLeft = dwmMaxRect.left + 1;
+        int safeTop = dwmMaxRect.top + 1;
+        int safeRight = dwmMaxRect.right - 2;
+        int safeBottom = dwmMaxRect.bottom - 2;
+        if (safeRight < safeLeft)
+        {
+            safeLeft = dwmMaxRect.left;
+            safeRight = dwmMaxRect.right - 1;
+        }
+
+        if (safeBottom < safeTop)
+        {
+            safeTop = dwmMaxRect.top;
+            safeBottom = dwmMaxRect.bottom - 1;
+        }
+
+        if (safeRight < safeLeft || safeBottom < safeTop)
+        {
+            return false;
+        }
+
+        double customWidth = customMaxRect.right - customMaxRect.left;
+        if (customWidth <= 0)
+        {
+            return false;
+        }
+
+        double normalizedX = (realScreenPoint.x - customMaxRect.left) / customWidth;
+        normalizedX = Math.Clamp(normalizedX, 0.0, 1.0);
+        int proxyX = safeLeft + (int)Math.Round((safeRight - safeLeft) * normalizedX, MidpointRounding.AwayFromZero);
+        proxyX = Math.Clamp(proxyX, safeLeft, safeRight);
+        int proxyY = safeTop + ((safeBottom - safeTop) / 2);
+        proxyScreenPoint = (proxyX, proxyY);
+        return true;
+    }
+
+    private static bool IsValidRect((int left, int top, int right, int bottom) rect)
+    {
+        return rect.right > rect.left && rect.bottom > rect.top;
+    }
+
+    private bool ShouldUseWin11SnapNcRouting()
+    {
+        return IsTitleBarVisible() &&
+               IsShowMaximizeButton &&
+               OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
+    }
+
+    private static bool IsSnapRelevantNcMessage(uint msg)
+    {
+        return msg == WM_NCHITTEST ||
+               msg == WM_NCMOUSEMOVE ||
+               msg == WM_NCMOUSEHOVER ||
+               msg == WM_NCMOUSELEAVE ||
+               msg == WM_NCLBUTTONDOWN ||
+               msg == WM_NCLBUTTONUP ||
+               msg == WM_NCLBUTTONDBLCLK;
+    }
+
+#if DEBUG
+    private static string GetNcMessageName(uint msg)
+    {
+        return msg switch
+        {
+            WM_NCHITTEST => "WM_NCHITTEST",
+            WM_NCMOUSEMOVE => "WM_NCMOUSEMOVE",
+            WM_NCMOUSEHOVER => "WM_NCMOUSEHOVER",
+            WM_NCMOUSELEAVE => "WM_NCMOUSELEAVE",
+            WM_NCLBUTTONDOWN => "WM_NCLBUTTONDOWN",
+            WM_NCLBUTTONUP => "WM_NCLBUTTONUP",
+            WM_NCLBUTTONDBLCLK => "WM_NCLBUTTONDBLCLK",
+            _ => $"0x{msg:X}"
+        };
+    }
+#endif
+
     private delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
 
     private void RegisterWindowClass()
@@ -1489,24 +2453,6 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
     {
         if (_windows.TryGetValue(hWnd, out var window))
         {
-            // Let DWM process non-client messages first for custom title bar windows.
-            // This is required for Windows 11 Snap Layout: DwmDefWindowProc tracks
-            // HTMAXBUTTON hover state within the extended frame area and manages the
-            // Snap Layout flyout popup. Without this, DWM never receives WM_NCMOUSEMOVE
-            // for the title bar region and cannot show the Snap Layout flyout.
-            //
-            // Skip WM_NCHITTEST: we always use our own hit test (button positions differ
-            // from system caption buttons).
-            // Skip WM_NCLBUTTON*: we handle button press/release/double-click ourselves
-            // to avoid DWM triggering system maximize behavior.
-            if (window.TitleBarStyle == WindowTitleBarStyle.Custom &&
-                msg != WM_NCHITTEST &&
-                msg != WM_NCLBUTTONDOWN && msg != WM_NCLBUTTONUP && msg != WM_NCLBUTTONDBLCLK &&
-                DwmDefWindowProc(hWnd, msg, wParam, lParam, out nint dwmResult))
-            {
-                return dwmResult;
-            }
-
             switch (msg)
             {
                 case WM_CLOSE:
@@ -1523,31 +2469,56 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                     return nint.Zero;
 
                 case WM_NCCALCSIZE:
-                    // For custom title bar, remove the non-client area (the white border)
-                    if (window.TitleBarStyle == WindowTitleBarStyle.Custom && wParam != nint.Zero)
+                    // For custom title bar:
+                    // 1) call DefWindowProc first to keep native NC contract intact
+                    // 2) in normal state, use full original rect as client area
+                    // 3) in maximized state, clamp to monitor work area
+                    if (window.TitleBarStyle == WindowTitleBarStyle.Custom)
                     {
-                        // Read the proposed rect from lParam
-                        var ncParams = Marshal.PtrToStructure<NCCALCSIZE_PARAMS>(lParam);
-
-                        if (IsZoomed(hWnd))
+                        // Per WM_NCCALCSIZE contract, return 0 when wParam == FALSE.
+                        if (wParam == nint.Zero)
                         {
-                            // When maximized, adjust to work area to respect the taskbar
+                            return nint.Zero;
+                        }
+
+                        // Save pre-DefWindowProc rect before NC calculations mutate it.
+                        var ncParams = Marshal.PtrToStructure<NCCALCSIZE_PARAMS>(lParam);
+                        var originalRect = (ncParams.rgrc0.left, ncParams.rgrc0.top, ncParams.rgrc0.right, ncParams.rgrc0.bottom);
+
+                        // Let DefWindowProc compute default non-client metrics first.
+                        var defResult = DefWindowProc(hWnd, msg, wParam, lParam);
+                        if (defResult != nint.Zero)
+                        {
+                            return defResult;
+                        }
+
+                        // Re-read DefWindowProc-computed rect and only apply minimal fixups.
+                        ncParams = Marshal.PtrToStructure<NCCALCSIZE_PARAMS>(lParam);
+                        var defClientRect = (ncParams.rgrc0.left, ncParams.rgrc0.top, ncParams.rgrc0.right, ncParams.rgrc0.bottom);
+                        var maximizedWorkArea = ((int left, int top, int right, int bottom)?)null;
+                        bool isMaximized = IsZoomed(hWnd);
+
+                        if (isMaximized)
+                        {
+                            // When maximized, adjust to work area to respect the taskbar.
                             var monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
                             MONITORINFO monitorInfo = new() { cbSize = (uint)Marshal.SizeOf<MONITORINFO>() };
                             if (GetMonitorInfo(monitor, ref monitorInfo))
                             {
-                                ncParams.rgrc0.left = monitorInfo.rcWork.left;
-                                ncParams.rgrc0.top = monitorInfo.rcWork.top;
-                                ncParams.rgrc0.right = monitorInfo.rcWork.right;
-                                ncParams.rgrc0.bottom = monitorInfo.rcWork.bottom;
+                                maximizedWorkArea = (monitorInfo.rcWork.left, monitorInfo.rcWork.top, monitorInfo.rcWork.right, monitorInfo.rcWork.bottom);
                             }
                         }
-                        // For normal windows, rgrc0 already contains the window rect
-                        // We don't modify it, so the entire window becomes the client area
+
+                        var computedRect = ComputeCustomNcCalcSizeRect(originalRect, defClientRect, isMaximized, maximizedWorkArea);
+                        ncParams.rgrc0.left = computedRect.left;
+                        ncParams.rgrc0.top = computedRect.top;
+                        ncParams.rgrc0.right = computedRect.right;
+                        ncParams.rgrc0.bottom = computedRect.bottom;
 
                         Marshal.StructureToPtr(ncParams, lParam, false);
-
-                        // Return 0 to use the entire window as client area
+#if DEBUG
+                        Debug.WriteLine($"[SnapDebug] WM_NCCALCSIZE custom rect={ncParams.rgrc0.left},{ncParams.rgrc0.top},{ncParams.rgrc0.right},{ncParams.rgrc0.bottom}");
+#endif
                         return nint.Zero;
                     }
                     break;
@@ -1555,10 +2526,36 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                 case WM_NCHITTEST:
                     if (window.TitleBarStyle == WindowTitleBarStyle.Custom)
                     {
-                        var hitResult = window.HandleNcHitTest(lParam);
-                        if (hitResult != HTNOWHERE)
+                        var customHitResult = window.HandleNcHitTest(lParam);
+#if DEBUG
+                        if (customHitResult == HTMAXBUTTON)
                         {
-                            return hitResult;
+                            Debug.WriteLine($"[SnapDebug] WM_NCHITTEST => HTMAXBUTTON, lParam=0x{lParam.ToInt64():X}");
+                        }
+#endif
+
+                        if (window.ShouldUseWin11SnapNcRouting() &&
+                            DwmDefWindowProc(hWnd, msg, wParam, lParam, out nint dwmHitResult))
+                        {
+#if DEBUG
+                            Debug.WriteLine($"[SnapDebug] DwmDefWindowProc({GetNcMessageName(msg)}) handled, result={dwmHitResult}");
+#endif
+                            // Keep custom caption-button hit-testing in charge so styled
+                            // button dimensions can enlarge WM_NCHITTEST regions.
+                            if (IsCaptionButtonNcHit(customHitResult))
+                            {
+                                return customHitResult;
+                            }
+
+                            if (dwmHitResult != nint.Zero)
+                            {
+                                return dwmHitResult;
+                            }
+                        }
+
+                        if (customHitResult != HTNOWHERE)
+                        {
+                            return customHitResult;
                         }
                     }
                     break;
@@ -1566,11 +2563,20 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                 case WM_NCMOUSEMOVE:
                     if (window.TitleBarStyle == WindowTitleBarStyle.Custom)
                     {
-                        // Return 0 to prevent Windows from showing native behaviors (tooltips, snap layouts)
-                        // when mouse is over title bar button areas
-                        if (window.OnNcMouseMove(wParam, lParam))
+                        window.OnNcMouseMove(wParam, lParam);
+                        if (window.ShouldUseWin11SnapNcRouting())
                         {
-                            return nint.Zero;
+                            _ = DwmDefWindowProc(hWnd, msg, wParam, lParam, out _);
+                        }
+                    }
+                    break;
+
+                case WM_NCMOUSEHOVER:
+                    if (window.TitleBarStyle == WindowTitleBarStyle.Custom)
+                    {
+                        if (window.ShouldUseWin11SnapNcRouting())
+                        {
+                            _ = DwmDefWindowProc(hWnd, msg, wParam, lParam, out _);
                         }
                     }
                     break;
@@ -1579,6 +2585,10 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                     if (window.TitleBarStyle == WindowTitleBarStyle.Custom)
                     {
                         window.OnNcMouseLeave();
+                        if (window.ShouldUseWin11SnapNcRouting())
+                        {
+                            _ = DwmDefWindowProc(hWnd, msg, wParam, lParam, out _);
+                        }
                     }
                     break;
 
@@ -1605,7 +2615,6 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                 case WM_NCLBUTTONDBLCLK:
                     if (window.TitleBarStyle == WindowTitleBarStyle.Custom)
                     {
-                        // Handle double-click on title bar for maximize/restore
                         if (window.OnNcLButtonDblClk(wParam, lParam))
                         {
                             return nint.Zero;
@@ -1617,6 +2626,11 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                 case WM_NCRBUTTONUP:
                     if (window.TitleBarStyle == WindowTitleBarStyle.Custom)
                     {
+                        if (window.ShouldUseWin11SnapNcRouting())
+                        {
+                            break;
+                        }
+
                         // Only suppress right-click when over a TitleBarButton
                         // Allow system menu on caption area (normal Windows behavior)
                         int ncRbX = (short)(lParam.ToInt64() & 0xFFFF);
@@ -1713,6 +2727,9 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                         suggestedRect.bottom - suggestedRect.top,
                         SWP_NOZORDER | SWP_NOACTIVATE);
 
+                    // Keep DWM extended-frame hover region in sync with new DPI.
+                    window.UpdateCustomTitleBarFrameMargins();
+
                     // Re-detect refresh rate (different monitor may have different rate)
                     CompositionTarget.UpdateRefreshRate(window.DetectMonitorRefreshRate());
 
@@ -1725,29 +2742,14 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
                     return nint.Zero;
 
                 case WM_SIZING:
-                    // WM_SIZING is sent continuously during drag resize - lParam points to RECT
-                    // RECT values are in physical screen pixels.
+                    // IMPORTANT: do not derive layout size from WM_SIZING RECT.
+                    // WM_SIZING provides outer window bounds (includes non-client frame),
+                    // while our layout uses client-area size (from WM_SIZE). Mixing these
+                    // two sources causes width oscillation during drag resize and makes
+                    // title bar content appear to shift left/right.
                     if (window._isSizing)
                     {
-                        var sizingRect = Marshal.PtrToStructure<RECT>(lParam);
-                        int newPhysWidth = sizingRect.right - sizingRect.left;
-                        int newPhysHeight = sizingRect.bottom - sizingRect.top;
-
-                        // Convert to DIPs for layout comparison and storage
-                        double newDipWidth = newPhysWidth / window._dpiScale;
-                        double newDipHeight = newPhysHeight / window._dpiScale;
-
-                        // Only resize if dimensions actually changed (avoid redundant operations)
-                        if (newPhysWidth > 0 && newPhysHeight > 0 &&
-                            (Math.Abs(newDipWidth - window.Width) > 0.5 || Math.Abs(newDipHeight - window.Height) > 0.5))
-                        {
-                            window.Width = newDipWidth;
-                            window.Height = newDipHeight;
-                            // RenderTarget uses physical pixels
-                            window.RenderTarget?.Resize(newPhysWidth, newPhysHeight);
-                            // Force immediate repaint to prevent DWM from showing stale/stretched content
-                            _ = RedrawWindow(hWnd, nint.Zero, nint.Zero, RDW_INVALIDATE | RDW_UPDATENOW);
-                        }
+                        _ = RedrawWindow(hWnd, nint.Zero, nint.Zero, RDW_INVALIDATE | RDW_UPDATENOW);
                     }
                     break;
 
@@ -1942,12 +2944,7 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         // Clear title bar button hover state when mouse leaves the window
         if (TitleBarStyle == WindowTitleBarStyle.Custom)
         {
-            UpdateTitleBarButtonHover(null);
-            if (_pressedTitleBarButton != null)
-            {
-                _pressedTitleBarButton.SetIsPressed(false);
-                _pressedTitleBarButton = null;
-            }
+            ClearTitleBarInteractionState();
         }
 
         // Clear general mouse over state
@@ -1972,16 +2969,10 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         Width = physicalWidth / _dpiScale;
         Height = physicalHeight / _dpiScale;
 
-        // During drag resize, WM_SIZING already handles resize and repaint.
-        // Only resize here for non-drag cases (maximize/restore/programmatic resize).
-        if (!_isSizing)
-        {
-            // RenderTarget uses physical pixel dimensions
-            RenderTarget?.Resize(physicalWidth, physicalHeight);
-            InvalidateMeasure();
-        }
-        // Note: During drag resize, WM_SIZING handles the RenderTarget.Resize and repaint
-        // to prevent jitter from DWM stretching old frames.
+        // Always use WM_SIZE client dimensions as the single source of truth.
+        // This keeps layout and swapchain size stable during drag resize.
+        RenderTarget?.Resize(physicalWidth, physicalHeight);
+        InvalidateMeasure();
     }
 
     private RenderTargetDrawingContext? _drawingContext;
@@ -2655,7 +3646,7 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         int timestamp = Environment.TickCount;
 
         // Check for title bar button hover (for custom title bar)
-        if (TitleBarStyle == WindowTitleBarStyle.Custom)
+        if (IsTitleBarVisible())
         {
             var titleBarButton = GetTitleBarButtonAtPoint(position);
             UpdateTitleBarButtonHover(titleBarButton);
@@ -2842,7 +3833,7 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         int timestamp = Environment.TickCount;
 
         // Handle title bar button press (for custom title bar)
-        if (TitleBarStyle == WindowTitleBarStyle.Custom && button == MouseButton.Left)
+        if (IsTitleBarVisible() && button == MouseButton.Left)
         {
             var titleBarButton = GetTitleBarButtonAtPoint(position);
             if (titleBarButton != null)
@@ -2916,7 +3907,7 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
         int timestamp = Environment.TickCount;
 
         // Handle title bar button release (for custom title bar)
-        if (TitleBarStyle == WindowTitleBarStyle.Custom && button == MouseButton.Left && _pressedTitleBarButton != null)
+        if (IsTitleBarVisible() && button == MouseButton.Left && _pressedTitleBarButton != null)
         {
             var titleBarButton = GetTitleBarButtonAtPoint(position);
             _pressedTitleBarButton.SetIsPressed(false);
@@ -3227,41 +4218,210 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
             _activeStylusDevices[pointerData.PointerId] = stylusDevice;
         }
 
+        Tablet.CurrentStylusDevice = stylusDevice;
+
         var properties = pointerData.Point.Properties;
         stylusDevice.UpdateState(
             pointerData.Position,
-            Math.Clamp(properties.Pressure, 0f, 1f),
+            pointerData.StylusPoints,
             inAir: !pointerData.Point.IsInContact,
             inverted: properties.IsInverted,
-            inRange: true,
+            inRange: pointerData.IsInRange,
             barrelPressed: properties.IsBarrelButtonPressed,
             eraserPressed: properties.IsEraser,
             directlyOver: target);
 
+        StylusInputAction inputAction = ResolveStylusInputAction(isDown, isUp, pointerData.Point.IsInContact);
+        RealTimeStylusProcessResult processResult = _realTimeStylus.Process(
+            pointerData.PointerId,
+            target,
+            inputAction,
+            stylusDevice.GetStylusPoints(target),
+            timestamp,
+            inAir: !pointerData.Point.IsInContact,
+            inRange: pointerData.IsInRange,
+            barrelButtonPressed: properties.IsBarrelButtonPressed,
+            eraserPressed: properties.IsEraser,
+            inverted: properties.IsInverted,
+            pointerCanceled: pointerData.IsCanceled);
+
+        stylusDevice.UpdateState(
+            pointerData.Position,
+            processResult.RawStylusInput.GetStylusPoints(),
+            inAir: !pointerData.Point.IsInContact,
+            inverted: properties.IsInverted,
+            inRange: pointerData.IsInRange,
+            barrelPressed: properties.IsBarrelButtonPressed,
+            eraserPressed: properties.IsEraser,
+            directlyOver: target);
+
+        RaiseStylusExtendedEvents(target, stylusDevice, timestamp, inputAction, processResult);
+
         RoutedEvent previewEvent = isDown ? PreviewStylusDownEvent : (isUp ? PreviewStylusUpEvent : PreviewStylusMoveEvent);
         RoutedEvent bubbleEvent = isDown ? StylusDownEvent : (isUp ? StylusUpEvent : StylusMoveEvent);
 
-        StylusEventArgs previewArgs = isDown
-            ? new StylusDownEventArgs(stylusDevice, timestamp) { RoutedEvent = previewEvent }
-            : new StylusEventArgs(stylusDevice, timestamp) { RoutedEvent = previewEvent };
+        StylusEventArgs previewArgs = CreateStylusEventArgs(stylusDevice, timestamp, previewEvent, isDown);
         target.RaiseEvent(previewArgs);
 
         sourceHandled |= previewArgs.Handled;
-        sourceCanceled |= previewArgs.Cancel;
+        sourceCanceled |= previewArgs.Cancel || processResult.Canceled;
 
-        if (!previewArgs.Handled)
+        if (!previewArgs.Handled && !processResult.Canceled)
         {
-            StylusEventArgs bubbleArgs = isDown
-                ? new StylusDownEventArgs(stylusDevice, timestamp) { RoutedEvent = bubbleEvent }
-                : new StylusEventArgs(stylusDevice, timestamp) { RoutedEvent = bubbleEvent };
+            StylusEventArgs bubbleArgs = CreateStylusEventArgs(stylusDevice, timestamp, bubbleEvent, isDown);
             target.RaiseEvent(bubbleArgs);
             sourceHandled |= bubbleArgs.Handled;
             sourceCanceled |= bubbleArgs.Cancel;
         }
 
-        if (isUp || sourceCanceled)
+        _realTimeStylus.QueueProcessedCallbacks(processResult);
+
+        if (isUp || sourceCanceled || processResult.SessionEnded)
         {
             _activeStylusDevices.Remove(pointerData.PointerId);
+            if (ReferenceEquals(Tablet.CurrentStylusDevice, stylusDevice))
+            {
+                Tablet.CurrentStylusDevice = null;
+            }
+        }
+    }
+
+    private static StylusInputAction ResolveStylusInputAction(bool isDown, bool isUp, bool isInContact)
+    {
+        if (isDown)
+        {
+            return StylusInputAction.Down;
+        }
+
+        if (isUp)
+        {
+            return StylusInputAction.Up;
+        }
+
+        return isInContact ? StylusInputAction.Move : StylusInputAction.InAirMove;
+    }
+
+    private static StylusEventArgs CreateStylusEventArgs(StylusDevice stylusDevice, int timestamp, RoutedEvent routedEvent, bool isDown)
+    {
+        StylusEventArgs args = isDown
+            ? new StylusDownEventArgs(stylusDevice, timestamp)
+            : new StylusEventArgs(stylusDevice, timestamp);
+        args.RoutedEvent = routedEvent;
+        return args;
+    }
+
+    private static StylusButton? GetBarrelButton(StylusDevice stylusDevice)
+    {
+        foreach (var button in stylusDevice.StylusButtons)
+        {
+            if (button.Name.Equals("Barrel", StringComparison.OrdinalIgnoreCase))
+            {
+                return button;
+            }
+        }
+
+        return stylusDevice.StylusButtons.Count > 0 ? stylusDevice.StylusButtons[0] : null;
+    }
+
+    private static void RaiseStylusSimpleEvent(UIElement target, StylusDevice stylusDevice, int timestamp, RoutedEvent routedEvent)
+    {
+        var args = new StylusEventArgs(stylusDevice, timestamp) { RoutedEvent = routedEvent };
+        target.RaiseEvent(args);
+    }
+
+    private static void RaiseStylusSystemGestureEvent(UIElement target, StylusDevice stylusDevice, int timestamp, SystemGesture gesture)
+    {
+        var args = new StylusSystemGestureEventArgs(stylusDevice, timestamp, gesture)
+        {
+            RoutedEvent = StylusSystemGestureEvent
+        };
+        target.RaiseEvent(args);
+    }
+
+    private static void RaiseStylusButtonEvent(UIElement target, StylusDevice stylusDevice, int timestamp, RoutedEvent routedEvent)
+    {
+        StylusButton? button = GetBarrelButton(stylusDevice);
+        if (button == null)
+        {
+            return;
+        }
+
+        var args = new StylusButtonEventArgs(stylusDevice, timestamp, button)
+        {
+            RoutedEvent = routedEvent
+        };
+        target.RaiseEvent(args);
+    }
+
+    private static void RaiseStylusExtendedEvents(
+        UIElement target,
+        StylusDevice stylusDevice,
+        int timestamp,
+        StylusInputAction inputAction,
+        RealTimeStylusProcessResult processResult)
+    {
+        if (processResult.LeftElement && processResult.PreviousTarget != null)
+        {
+            RaiseStylusSimpleEvent(processResult.PreviousTarget, stylusDevice, timestamp, StylusLeaveEvent);
+        }
+
+        if (processResult.EnteredElement)
+        {
+            RaiseStylusSimpleEvent(target, stylusDevice, timestamp, StylusEnterEvent);
+        }
+
+        if (processResult.EnteredRange)
+        {
+            RaiseStylusSimpleEvent(target, stylusDevice, timestamp, StylusInRangeEvent);
+            RaiseStylusSystemGestureEvent(target, stylusDevice, timestamp, SystemGesture.HoverEnter);
+        }
+
+        if (processResult.ExitedRange)
+        {
+            RaiseStylusSimpleEvent(processResult.PreviousTarget ?? target, stylusDevice, timestamp, StylusOutOfRangeEvent);
+            RaiseStylusSystemGestureEvent(processResult.PreviousTarget ?? target, stylusDevice, timestamp, SystemGesture.HoverLeave);
+        }
+
+        if (processResult.BarrelButtonDown)
+        {
+            RaiseStylusButtonEvent(target, stylusDevice, timestamp, StylusButtonDownEvent);
+        }
+
+        if (processResult.BarrelButtonUp)
+        {
+            RaiseStylusButtonEvent(target, stylusDevice, timestamp, StylusButtonUpEvent);
+        }
+
+        switch (inputAction)
+        {
+            case StylusInputAction.Down:
+                RaiseStylusSystemGestureEvent(
+                    target,
+                    stylusDevice,
+                    timestamp,
+                    stylusDevice.StylusButtons.Count > 0 && stylusDevice.StylusButtons[0].StylusButtonState == StylusButtonState.Down
+                        ? SystemGesture.RightTap
+                        : SystemGesture.Tap);
+                RaiseStylusSystemGestureEvent(target, stylusDevice, timestamp, SystemGesture.HoldEnter);
+                break;
+
+            case StylusInputAction.Move:
+                RaiseStylusSystemGestureEvent(
+                    target,
+                    stylusDevice,
+                    timestamp,
+                    stylusDevice.StylusButtons.Count > 0 && stylusDevice.StylusButtons[0].StylusButtonState == StylusButtonState.Down
+                        ? SystemGesture.RightDrag
+                        : SystemGesture.Drag);
+                break;
+
+            case StylusInputAction.InAirMove:
+                RaiseStylusSimpleEvent(target, stylusDevice, timestamp, StylusInAirMoveEvent);
+                break;
+
+            case StylusInputAction.Up:
+                RaiseStylusSystemGestureEvent(target, stylusDevice, timestamp, SystemGesture.HoldLeave);
+                break;
         }
     }
 
@@ -3645,7 +4805,16 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
     {
         _activePointerTargets.Remove(pointerId);
         _lastPointerPoints.Remove(pointerId);
-        _activeStylusDevices.Remove(pointerId);
+        if (_activeStylusDevices.TryGetValue(pointerId, out var stylusDevice))
+        {
+            _activeStylusDevices.Remove(pointerId);
+            if (ReferenceEquals(Tablet.CurrentStylusDevice, stylusDevice))
+            {
+                Tablet.CurrentStylusDevice = null;
+            }
+        }
+
+        _realTimeStylus.CancelSession(pointerId);
         _activeManipulationSessions.Remove(pointerId);
 
         TouchDevice? touchDevice = Touch.GetDevice((int)pointerId);
@@ -3824,6 +4993,7 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
 
     // DWM system backdrop type (Windows 11 22H2+)
     private const int DWMWA_SYSTEMBACKDROP_TYPE = 38;
+    private const int DWMWA_CAPTION_BUTTON_BOUNDS = 5;
     // DWM_SYSTEMBACKDROP_TYPE values
     private const int DWMSBT_AUTO = 0;           // Auto
     private const int DWMSBT_NONE = 1;           // None
@@ -3916,6 +5086,7 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
 
     // Non-client mouse messages
     private const uint WM_NCMOUSEMOVE = 0x00A0;
+    private const uint WM_NCMOUSEHOVER = 0x02A0;
     private const uint WM_NCLBUTTONDOWN = 0x00A1;
     private const uint WM_NCLBUTTONUP = 0x00A2;
     private const uint WM_NCLBUTTONDBLCLK = 0x00A3;
@@ -3924,8 +5095,10 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
     private const uint WM_NCMOUSELEAVE = 0x02A2;
 
     // TrackMouseEvent flags
+    private const uint TME_HOVER = 0x00000001;
     private const uint TME_LEAVE = 0x00000002;
     private const uint TME_NONCLIENT = 0x00000010;
+    private const uint HOVER_DEFAULT = 0xFFFFFFFF;
 
     // Cursor message
     private const uint WM_SETCURSOR = 0x0020;
@@ -4067,6 +5240,10 @@ public partial class Window : ContentControl, IWindowHost, ILayoutManagerHost
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool ScreenToClient(nint hWnd, ref POINT lpPoint);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool ClientToScreen(nint hWnd, ref POINT lpPoint);
 
     [LibraryImport("user32.dll", EntryPoint = "GetWindowLongW")]
     private static partial long GetWindowLong(nint hWnd, int nIndex);

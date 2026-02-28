@@ -38,8 +38,8 @@ public sealed class DatePicker : Control
         DependencyProperty.Register(nameof(Header), typeof(object), typeof(DatePicker),
             new PropertyMetadata(null, OnLayoutPropertyChanged));
 
-    public static readonly DependencyProperty PlaceholderTextProperty =
-        DependencyProperty.Register(nameof(PlaceholderText), typeof(string), typeof(DatePicker),
+    public static readonly DependencyProperty PlaceholderProperty =
+        DependencyProperty.Register(nameof(Placeholder), typeof(string), typeof(DatePicker),
             new PropertyMetadata("Select a date", OnVisualPropertyChanged));
 
     public static readonly DependencyProperty DateFormatProperty =
@@ -124,10 +124,10 @@ public sealed class DatePicker : Control
         set => SetValue(HeaderProperty, value);
     }
 
-    public string? PlaceholderText
+    public string? Placeholder
     {
-        get => (string?)GetValue(PlaceholderTextProperty);
-        set => SetValue(PlaceholderTextProperty, value);
+        get => (string?)GetValue(PlaceholderProperty);
+        set => SetValue(PlaceholderProperty, value);
     }
 
     public string DateFormat
@@ -485,7 +485,7 @@ public sealed class DatePicker : Control
         }
         else
         {
-            displayText = PlaceholderText ?? "Select a date";
+            displayText = Placeholder ?? "Select a date";
             textBrush = s_placeholderBrush;
         }
 
