@@ -1051,6 +1051,16 @@ public class FrameworkElement : UIElement
             // inherited from an ancestor that is now reachable via the visual tree
             ReactivateBindingsRecursive(this);
 
+            // Reattaching only this root is not sufficient when descendants remain
+            // "valid" with cached geometry from a prior host. Mark descendants dirty
+            // so the next pass cannot skip their measure/arrange.
+            MarkDescendantLayoutInvalidForReattach(this);
+
+            // Reparented elements must be re-measured/re-arranged in the new host tree.
+            InvalidateMeasure();
+            InvalidateArrange();
+            InvalidateVisual();
+
             // Defer Loaded event until after layout completes.
             // WPF fires Loaded after the first Measure/Arrange pass, so
             // ActualWidth/ActualHeight are available in handlers.
@@ -1081,7 +1091,7 @@ public class FrameworkElement : UIElement
     }
 
     /// <summary>
-    /// Removes this element from the LayoutManager's queues when detached from the visual tree.
+    /// Removes this element subtree from the LayoutManager's queues when detached from the visual tree.
     /// </summary>
     private void RemoveFromLayoutManager(Visual oldParent)
     {
@@ -1090,10 +1100,28 @@ public class FrameworkElement : UIElement
         {
             if (current is ILayoutManagerHost host)
             {
-                host.LayoutManager.Remove(this);
+                RemoveSubtreeFromLayoutManager(host.LayoutManager, this);
                 return;
             }
             current = current.VisualParent;
+        }
+    }
+
+    private static void RemoveSubtreeFromLayoutManager(LayoutManager layoutManager, Visual root)
+    {
+        if (root is UIElement element)
+        {
+            layoutManager.Remove(element);
+        }
+
+        var childCount = root.VisualChildrenCount;
+        for (int i = 0; i < childCount; i++)
+        {
+            var child = root.GetVisualChild(i);
+            if (child != null)
+            {
+                RemoveSubtreeFromLayoutManager(layoutManager, child);
+            }
         }
     }
 
@@ -1114,6 +1142,37 @@ public class FrameworkElement : UIElement
             if (child != null)
             {
                 ReactivateBindingsRecursive(child);
+            }
+        }
+    }
+
+    private static void MarkDescendantLayoutInvalidForReattach(Visual root)
+    {
+        var childCount = root.VisualChildrenCount;
+        for (int i = 0; i < childCount; i++)
+        {
+            var child = root.GetVisualChild(i);
+            if (child != null)
+            {
+                MarkSubtreeLayoutInvalid(child);
+            }
+        }
+    }
+
+    private static void MarkSubtreeLayoutInvalid(Visual visual)
+    {
+        if (visual is UIElement uiElement)
+        {
+            uiElement.MarkMeasureInvalid();
+        }
+
+        var childCount = visual.VisualChildrenCount;
+        for (int i = 0; i < childCount; i++)
+        {
+            var child = visual.GetVisualChild(i);
+            if (child != null)
+            {
+                MarkSubtreeLayoutInvalid(child);
             }
         }
     }

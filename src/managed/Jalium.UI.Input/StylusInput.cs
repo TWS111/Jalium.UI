@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using Jalium.UI;
 
 namespace Jalium.UI.Input;
@@ -29,7 +29,7 @@ public abstract class StylusDevice : InputDevice
     }
 
     public virtual Point GetPosition(UIElement? relativeTo) => default;
-    public virtual InputStylusPointCollection GetStylusPoints(UIElement? relativeTo) => new();
+    public virtual StylusPointCollection GetStylusPoints(UIElement? relativeTo) => new();
 }
 
 /// <summary>
@@ -40,7 +40,7 @@ public sealed class PointerStylusDevice : StylusDevice
     private readonly StylusButton _barrelButton = new("Barrel", Guid.Parse("F0720328-663B-418F-85A6-9531AE3ECDFA"));
     private readonly StylusButton _eraserButton = new("Eraser", Guid.Parse("2F77EA8B-7F39-4FC2-9D0A-36A930AFB85E"));
     private readonly StylusButtonCollection _stylusButtons;
-    private InputStylusPointCollection _points = new();
+    private StylusPointCollection _points = new();
     private Point _position;
 
     public PointerStylusDevice(int id, string? name = null)
@@ -59,7 +59,7 @@ public sealed class PointerStylusDevice : StylusDevice
 
     public void UpdateState(
         Point position,
-        float pressureFactor,
+        StylusPointCollection stylusPoints,
         bool inAir,
         bool inverted,
         bool inRange,
@@ -74,14 +74,37 @@ public sealed class PointerStylusDevice : StylusDevice
         DirectlyOver = directlyOver;
         _barrelButton.StylusButtonState = barrelPressed ? StylusButtonState.Down : StylusButtonState.Up;
         _eraserButton.StylusButtonState = eraserPressed ? StylusButtonState.Down : StylusButtonState.Up;
-        _points = new InputStylusPointCollection(new[] { new InputStylusPoint(position.X, position.Y, pressureFactor) });
+        _points = stylusPoints.Count > 0
+            ? new StylusPointCollection(stylusPoints)
+            : new StylusPointCollection(new[] { new StylusPoint(position.X, position.Y, 0.5f) });
+    }
+
+    public void UpdateState(
+        Point position,
+        float pressureFactor,
+        bool inAir,
+        bool inverted,
+        bool inRange,
+        bool barrelPressed,
+        bool eraserPressed,
+        UIElement? directlyOver)
+    {
+        UpdateState(
+            position,
+            new StylusPointCollection(new[] { new StylusPoint(position.X, position.Y, pressureFactor) }),
+            inAir,
+            inverted,
+            inRange,
+            barrelPressed,
+            eraserPressed,
+            directlyOver);
     }
 
     public override Point GetPosition(UIElement? relativeTo) => _position;
 
-    public override InputStylusPointCollection GetStylusPoints(UIElement? relativeTo)
+    public override StylusPointCollection GetStylusPoints(UIElement? relativeTo)
     {
-        return new InputStylusPointCollection(_points);
+        return new StylusPointCollection(_points);
     }
 }
 
@@ -107,7 +130,7 @@ public abstract class TabletDevice : InputDevice
 public static class Tablet
 {
     public static TabletDeviceCollection TabletDevices { get; } = new();
-    public static StylusDevice? CurrentStylusDevice { get; internal set; }
+    public static StylusDevice? CurrentStylusDevice { get; set; }
 }
 
 /// <summary>
@@ -236,34 +259,6 @@ public static class StylusPointProperties
     public static readonly StylusPointProperty BarrelButton = new(new Guid("F0720328-663B-418F-85A6-9531AE3ECDFA"), true);
 }
 
-/// <summary>
-/// Represents a single stylus input point in the input layer.
-/// </summary>
-public struct InputStylusPoint
-{
-    public double X { get; set; }
-    public double Y { get; set; }
-    public float PressureFactor { get; set; }
-
-    public InputStylusPoint(double x, double y) : this(x, y, 0.5f) { }
-
-    public InputStylusPoint(double x, double y, float pressureFactor)
-    {
-        X = x;
-        Y = y;
-        PressureFactor = pressureFactor;
-    }
-}
-
-/// <summary>
-/// Collection of stylus points for the input layer.
-/// </summary>
-public sealed class InputStylusPointCollection : Collection<InputStylusPoint>
-{
-    public InputStylusPointCollection() { }
-    public InputStylusPointCollection(IEnumerable<InputStylusPoint> points) : base(new List<InputStylusPoint>(points)) { }
-}
-
 public enum StylusButtonState { Up, Down }
 public enum TabletDeviceType { Stylus, Touch }
 
@@ -289,3 +284,5 @@ public enum StylusPointPropertyUnit
     Pounds,
     Grams
 }
+
+

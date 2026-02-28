@@ -1,3 +1,5 @@
+ï»¿using Jalium.UI.Input.StylusPlugIns;
+
 namespace Jalium.UI;
 
 /// <summary>
@@ -8,6 +10,22 @@ public abstract partial class UIElement : Visual, IInputElement
     #region Event Handlers
 
     private Dictionary<RoutedEvent, List<RoutedEventHandlerInfo>>? _eventHandlers;
+    private StylusPlugInCollection? _stylusPlugIns;
+
+    /// <summary>
+    /// Gets the stylus plug-ins attached to this element.
+    /// </summary>
+    public StylusPlugInCollection StylusPlugIns => GetStylusPlugIns(createIfMissing: true)!;
+
+    internal StylusPlugInCollection? GetStylusPlugIns(bool createIfMissing)
+    {
+        if (_stylusPlugIns == null && createIfMissing)
+        {
+            _stylusPlugIns = new StylusPlugInCollection(this);
+        }
+
+        return _stylusPlugIns;
+    }
 
     /// <summary>
     /// Adds a handler for the specified routed event.
@@ -341,7 +359,7 @@ public abstract partial class UIElement : Visual, IInputElement
 
     /// <summary>
     /// Gets or sets whether this element is enabled.
-    /// The effective value considers the parent chain ¡ª if any ancestor is disabled,
+    /// The effective value considers the parent chain â€” if any ancestor is disabled,
     /// this element is also effectively disabled.
     /// </summary>
     public bool IsEnabled
@@ -671,7 +689,7 @@ public abstract partial class UIElement : Visual, IInputElement
 
     /// <summary>
     /// Gets or sets a visual-only translation offset applied during rendering.
-    /// Does not affect layout ¡ª used for animation effects (e.g., cloth draping).
+    /// Does not affect layout â€” used for animation effects (e.g., cloth draping).
     /// </summary>
     internal Point RenderOffset { get; set; }
 
@@ -742,17 +760,20 @@ public abstract partial class UIElement : Visual, IInputElement
         var wasValid = _isMeasureValid;
         _isMeasureValid = false;
         _isArrangeValid = false;
+        var layoutManager = FindLayoutManager();
 
         if (wasValid)
         {
             // First invalidation: notify LayoutManager and mark parent dirty
-            FindLayoutManager()?.InvalidateMeasure(this);
+            layoutManager?.InvalidateMeasure(this);
             InvalidateLayoutVisual();
         }
         else
         {
-            // Already invalid ¡ª element is already queued in LayoutManager.
-            // Just ensure a repaint is scheduled.
+            // Already invalid. If this element became invalid while detached,
+            // it may not be in the current LayoutManager queue yet.
+            // Re-queue is idempotent (LayoutManager uses HashSet).
+            layoutManager?.InvalidateMeasure(this);
             GetWindowHost()?.InvalidateWindow();
         }
     }
@@ -764,16 +785,19 @@ public abstract partial class UIElement : Visual, IInputElement
     {
         var wasValid = _isArrangeValid;
         _isArrangeValid = false;
+        var layoutManager = FindLayoutManager();
 
         if (wasValid)
         {
             // First invalidation: notify LayoutManager and mark parent dirty
-            FindLayoutManager()?.InvalidateArrange(this);
+            layoutManager?.InvalidateArrange(this);
             InvalidateLayoutVisual();
         }
         else
         {
-            // Already invalid ¡ª just ensure repaint.
+            // Same rationale as InvalidateMeasure: keep queue membership correct
+            // when transitioning from detached -> attached while already invalid.
+            layoutManager?.InvalidateArrange(this);
             GetWindowHost()?.InvalidateWindow();
         }
     }
@@ -783,7 +807,7 @@ public abstract partial class UIElement : Visual, IInputElement
     /// Layout changes (measure/arrange) can move elements arbitrarily,
     /// so dirty rects for individual elements are unreliable.
     /// Full invalidation is acceptable because layout changes are infrequent
-    /// (expand/collapse, content switch) ¡ª not per-frame like hover effects.
+    /// (expand/collapse, content switch) â€” not per-frame like hover effects.
     /// </summary>
     private void InvalidateLayoutVisual()
     {
@@ -1461,6 +1485,54 @@ public abstract partial class UIElement : Visual, IInputElement
         EventManager.RegisterRoutedEvent(nameof(StylusUp), RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(UIElement));
 
     /// <summary>
+    /// Identifies the StylusInAirMove routed event.
+    /// </summary>
+    public static readonly RoutedEvent StylusInAirMoveEvent =
+        EventManager.RegisterRoutedEvent(nameof(StylusInAirMove), RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(UIElement));
+
+    /// <summary>
+    /// Identifies the StylusEnter routed event.
+    /// </summary>
+    public static readonly RoutedEvent StylusEnterEvent =
+        EventManager.RegisterRoutedEvent(nameof(StylusEnter), RoutingStrategy.Direct, typeof(RoutedEventHandler), typeof(UIElement));
+
+    /// <summary>
+    /// Identifies the StylusLeave routed event.
+    /// </summary>
+    public static readonly RoutedEvent StylusLeaveEvent =
+        EventManager.RegisterRoutedEvent(nameof(StylusLeave), RoutingStrategy.Direct, typeof(RoutedEventHandler), typeof(UIElement));
+
+    /// <summary>
+    /// Identifies the StylusInRange routed event.
+    /// </summary>
+    public static readonly RoutedEvent StylusInRangeEvent =
+        EventManager.RegisterRoutedEvent(nameof(StylusInRange), RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(UIElement));
+
+    /// <summary>
+    /// Identifies the StylusOutOfRange routed event.
+    /// </summary>
+    public static readonly RoutedEvent StylusOutOfRangeEvent =
+        EventManager.RegisterRoutedEvent(nameof(StylusOutOfRange), RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(UIElement));
+
+    /// <summary>
+    /// Identifies the StylusButtonDown routed event.
+    /// </summary>
+    public static readonly RoutedEvent StylusButtonDownEvent =
+        EventManager.RegisterRoutedEvent(nameof(StylusButtonDown), RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(UIElement));
+
+    /// <summary>
+    /// Identifies the StylusButtonUp routed event.
+    /// </summary>
+    public static readonly RoutedEvent StylusButtonUpEvent =
+        EventManager.RegisterRoutedEvent(nameof(StylusButtonUp), RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(UIElement));
+
+    /// <summary>
+    /// Identifies the StylusSystemGesture routed event.
+    /// </summary>
+    public static readonly RoutedEvent StylusSystemGestureEvent =
+        EventManager.RegisterRoutedEvent(nameof(StylusSystemGesture), RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(UIElement));
+
+    /// <summary>
     /// Identifies the PreviewPointerDown routed event.
     /// </summary>
     public static readonly RoutedEvent PreviewPointerDownEvent =
@@ -1848,6 +1920,78 @@ public abstract partial class UIElement : Visual, IInputElement
     {
         add => AddHandler(StylusUpEvent, value);
         remove => RemoveHandler(StylusUpEvent, value);
+    }
+
+    /// <summary>
+    /// Occurs when stylus moves in air.
+    /// </summary>
+    public event RoutedEventHandler StylusInAirMove
+    {
+        add => AddHandler(StylusInAirMoveEvent, value);
+        remove => RemoveHandler(StylusInAirMoveEvent, value);
+    }
+
+    /// <summary>
+    /// Occurs when stylus enters this element.
+    /// </summary>
+    public event RoutedEventHandler StylusEnter
+    {
+        add => AddHandler(StylusEnterEvent, value);
+        remove => RemoveHandler(StylusEnterEvent, value);
+    }
+
+    /// <summary>
+    /// Occurs when stylus leaves this element.
+    /// </summary>
+    public event RoutedEventHandler StylusLeave
+    {
+        add => AddHandler(StylusLeaveEvent, value);
+        remove => RemoveHandler(StylusLeaveEvent, value);
+    }
+
+    /// <summary>
+    /// Occurs when stylus enters detection range.
+    /// </summary>
+    public event RoutedEventHandler StylusInRange
+    {
+        add => AddHandler(StylusInRangeEvent, value);
+        remove => RemoveHandler(StylusInRangeEvent, value);
+    }
+
+    /// <summary>
+    /// Occurs when stylus exits detection range.
+    /// </summary>
+    public event RoutedEventHandler StylusOutOfRange
+    {
+        add => AddHandler(StylusOutOfRangeEvent, value);
+        remove => RemoveHandler(StylusOutOfRangeEvent, value);
+    }
+
+    /// <summary>
+    /// Occurs when a stylus button is pressed.
+    /// </summary>
+    public event RoutedEventHandler StylusButtonDown
+    {
+        add => AddHandler(StylusButtonDownEvent, value);
+        remove => RemoveHandler(StylusButtonDownEvent, value);
+    }
+
+    /// <summary>
+    /// Occurs when a stylus button is released.
+    /// </summary>
+    public event RoutedEventHandler StylusButtonUp
+    {
+        add => AddHandler(StylusButtonUpEvent, value);
+        remove => RemoveHandler(StylusButtonUpEvent, value);
+    }
+
+    /// <summary>
+    /// Occurs when a stylus system gesture is recognized.
+    /// </summary>
+    public event RoutedEventHandler StylusSystemGesture
+    {
+        add => AddHandler(StylusSystemGestureEvent, value);
+        remove => RemoveHandler(StylusSystemGestureEvent, value);
     }
 
     /// <summary>
@@ -2406,5 +2550,8 @@ internal interface ILayoutManagerHost
     /// </summary>
     LayoutManager LayoutManager { get; }
 }
+
+
+
 
 

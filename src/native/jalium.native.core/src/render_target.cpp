@@ -97,6 +97,29 @@ JALIUM_API void jalium_render_target_set_full_invalidation(JaliumRenderTarget* r
     }
 }
 
+JALIUM_API JaliumResult jalium_render_target_create_webview_visual(
+    JaliumRenderTarget* rt,
+    void** visual_out)
+{
+    if (!rt || !visual_out) {
+        return JALIUM_ERROR_INVALID_ARGUMENT;
+    }
+
+    *visual_out = nullptr;
+    return reinterpret_cast<jalium::RenderTarget*>(rt)->CreateWebViewVisual(visual_out);
+}
+
+JALIUM_API JaliumResult jalium_render_target_destroy_webview_visual(
+    JaliumRenderTarget* rt,
+    void* visual)
+{
+    if (!rt || !visual) {
+        return JALIUM_ERROR_INVALID_ARGUMENT;
+    }
+
+    return reinterpret_cast<jalium::RenderTarget*>(rt)->DestroyWebViewVisual(visual);
+}
+
 JALIUM_API void jalium_draw_fill_rectangle(
     JaliumRenderTarget* rt,
     float x, float y, float width, float height,

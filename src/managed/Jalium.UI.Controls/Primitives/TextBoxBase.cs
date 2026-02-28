@@ -228,6 +228,13 @@ public abstract class TextBoxBase : Control
         DependencyProperty.Register(nameof(VerticalScrollBarVisibility), typeof(ScrollBarVisibility), typeof(TextBoxBase),
             new PropertyMetadata(ScrollBarVisibility.Hidden));
 
+    /// <summary>
+    /// Identifies the TextTrimming dependency property.
+    /// </summary>
+    public static readonly DependencyProperty TextTrimmingProperty =
+        DependencyProperty.Register(nameof(TextTrimming), typeof(TextTrimming), typeof(TextBoxBase),
+            new PropertyMetadata(TextTrimming.CharacterEllipsis, OnVisualPropertyChanged));
+
     #endregion
 
     #region CLR Properties
@@ -311,6 +318,15 @@ public abstract class TextBoxBase : Control
     {
         get => (ScrollBarVisibility)GetValue(VerticalScrollBarVisibilityProperty)!;
         set => SetValue(VerticalScrollBarVisibilityProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the trimming behavior for visible text when it overflows the content area.
+    /// </summary>
+    public TextTrimming TextTrimming
+    {
+        get => (TextTrimming)GetValue(TextTrimmingProperty)!;
+        set => SetValue(TextTrimmingProperty, value);
     }
 
     /// <summary>

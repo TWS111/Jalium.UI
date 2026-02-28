@@ -447,6 +447,20 @@ public class AutomationPeerTests
     }
 
     [Fact]
+    public void PasswordBoxAutomationPeer_GetName_ReturnsPlaceholder()
+    {
+        // Arrange
+        var passwordBox = new PasswordBox { Placeholder = "Enter your password" };
+
+        // Act
+        var peer = passwordBox.GetAutomationPeer();
+        var name = peer!.GetName();
+
+        // Assert
+        Assert.Equal("Enter your password", name);
+    }
+
+    [Fact]
     public void PasswordBoxAutomationPeer_Value_ReturnsEmptyForSecurity()
     {
         // Arrange

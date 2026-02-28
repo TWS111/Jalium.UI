@@ -44,10 +44,10 @@ public class ComboBox : Selector
             new PropertyMetadata(200.0));
 
     /// <summary>
-    /// Identifies the PlaceholderText dependency property.
+    /// Identifies the Placeholder dependency property.
     /// </summary>
-    public static readonly DependencyProperty PlaceholderTextProperty =
-        DependencyProperty.Register(nameof(PlaceholderText), typeof(string), typeof(ComboBox),
+    public static readonly DependencyProperty PlaceholderProperty =
+        DependencyProperty.Register(nameof(Placeholder), typeof(string), typeof(ComboBox),
             new PropertyMetadata("Select an item..."));
 
     /// <summary>
@@ -91,10 +91,10 @@ public class ComboBox : Selector
     /// <summary>
     /// Gets or sets the placeholder text shown when no item is selected.
     /// </summary>
-    public string PlaceholderText
+    public string Placeholder
     {
-        get => (string)(GetValue(PlaceholderTextProperty) ?? "Select an item...");
-        set => SetValue(PlaceholderTextProperty, value);
+        get => (string)(GetValue(PlaceholderProperty) ?? "Select an item...");
+        set => SetValue(PlaceholderProperty, value);
     }
 
     /// <summary>
@@ -129,7 +129,7 @@ public class ComboBox : Selector
         SizeChanged += OnComboBoxSizeChanged;
 
         // Initialize SelectionBoxItem with placeholder
-        SelectionBoxItem = PlaceholderText;
+        SelectionBoxItem = Placeholder;
 
         // Set up mouse handling for toggle
         AddHandler(MouseDownEvent, new RoutedEventHandler(OnMouseDownHandler));
@@ -347,7 +347,7 @@ public class ComboBox : Selector
         }
         else
         {
-            SelectionBoxItem = PlaceholderText;
+            SelectionBoxItem = Placeholder;
         }
     }
 

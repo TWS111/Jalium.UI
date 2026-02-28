@@ -22,6 +22,29 @@ public class ThemeRuntimeSwitchTests
     }
 
     [Fact]
+    public void ApplicationCtor_ShouldAutoInitializeTheme_WithoutManualJalxamlLoad()
+    {
+        ResetApplicationState();
+        var originalLoader = ThemeManager.XamlLoader;
+        ThemeManager.XamlLoader = null;
+
+        try
+        {
+            var app = new Application();
+
+            Assert.NotNull(ThemeManager.XamlLoader);
+            Assert.True(ThemeManager.IsInitialized);
+            Assert.True(app.Resources.TryGetValue(typeof(Button), out var buttonStyle));
+            Assert.IsType<Style>(buttonStyle);
+        }
+        finally
+        {
+            ThemeManager.XamlLoader = originalLoader;
+            ResetApplicationState();
+        }
+    }
+
+    [Fact]
     public void ApplyTheme_ShouldUpdate_Button_TextBox_NavigationView_Brushing()
     {
         ResetApplicationState();

@@ -113,10 +113,10 @@ public sealed class NumberBox : TextBoxBase, IImeSupport
             new PropertyMetadata(NumberBoxSpinButtonPlacementMode.Inline, OnLayoutPropertyChanged));
 
     /// <summary>
-    /// Identifies the PlaceholderText dependency property.
+    /// Identifies the Placeholder dependency property.
     /// </summary>
-    public static readonly DependencyProperty PlaceholderTextProperty =
-        DependencyProperty.Register(nameof(PlaceholderText), typeof(string), typeof(NumberBox),
+    public static readonly DependencyProperty PlaceholderProperty =
+        DependencyProperty.Register(nameof(Placeholder), typeof(string), typeof(NumberBox),
             new PropertyMetadata(null, OnVisualPropertyChanged));
 
     /// <summary>
@@ -235,10 +235,10 @@ public sealed class NumberBox : TextBoxBase, IImeSupport
     /// <summary>
     /// Gets or sets the placeholder text.
     /// </summary>
-    public string? PlaceholderText
+    public string? Placeholder
     {
-        get => (string?)GetValue(PlaceholderTextProperty);
-        set => SetValue(PlaceholderTextProperty, value);
+        get => (string?)GetValue(PlaceholderProperty);
+        set => SetValue(PlaceholderProperty, value);
     }
 
     /// <summary>
@@ -1146,11 +1146,14 @@ public sealed class NumberBox : TextBoxBase, IImeSupport
 
         // Draw text or placeholder
         var displayText = _text;
-        if (string.IsNullOrEmpty(displayText) && !string.IsNullOrEmpty(PlaceholderText))
+        if (string.IsNullOrEmpty(displayText) && !string.IsNullOrEmpty(Placeholder))
         {
-            var placeholderFormatted = new FormattedText(PlaceholderText, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14)
+            var placeholderFormatted = new FormattedText(Placeholder, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14)
             {
-                Foreground = s_placeholderBrush
+                Foreground = s_placeholderBrush,
+                MaxTextWidth = Math.Max(0, contentRect.Width),
+                MaxTextHeight = lineHeight,
+                Trimming = TextTrimming
             };
             TextMeasurement.MeasureText(placeholderFormatted);
             var textY = contentRect.Top + (contentRect.Height - placeholderFormatted.Height) / 2;
@@ -1160,7 +1163,10 @@ public sealed class NumberBox : TextBoxBase, IImeSupport
         {
             var valueFormatted = new FormattedText(displayText, FontFamily ?? "Segoe UI", FontSize > 0 ? FontSize : 14)
             {
-                Foreground = Foreground ?? s_whiteBrush
+                Foreground = Foreground ?? s_whiteBrush,
+                MaxTextWidth = Math.Max(0, contentRect.Width),
+                MaxTextHeight = lineHeight,
+                Trimming = TextTrimming
             };
             TextMeasurement.MeasureText(valueFormatted);
             var textY = contentRect.Top + (contentRect.Height - valueFormatted.Height) / 2;

@@ -205,10 +205,12 @@ public class StackPanel : Panel, IScrollInfo
             if (child.Visibility == Visibility.Collapsed)
                 continue;
 
-            // Give each child infinite space in the stack direction
+            // Give each child infinite space in the stack direction.
+            // When hosted by ScrollViewer and scrolling is enabled for the cross axis,
+            // measure unconstrained there too so extent reflects full content size.
             var childAvailable = isVertical
-                ? new Size(availableSize.Width, double.PositiveInfinity)
-                : new Size(double.PositiveInfinity, availableSize.Height);
+                ? new Size(_canHorizontallyScroll ? double.PositiveInfinity : availableSize.Width, double.PositiveInfinity)
+                : new Size(double.PositiveInfinity, _canVerticallyScroll ? double.PositiveInfinity : availableSize.Height);
 
             child.Measure(childAvailable);
             var childSize = child.DesiredSize;
@@ -260,16 +262,18 @@ public class StackPanel : Panel, IScrollInfo
                 continue;
 
             var childSize = child.DesiredSize;
+            var arrangeWidth = isVertical && _canHorizontallyScroll ? Math.Max(finalSize.Width, _extent.Width) : finalSize.Width;
+            var arrangeHeight = !isVertical && _canVerticallyScroll ? Math.Max(finalSize.Height, _extent.Height) : finalSize.Height;
 
             Rect childRect;
             if (isVertical)
             {
-                childRect = new Rect(scrollOffsetX, offset + scrollOffsetY, finalSize.Width, childSize.Height);
+                childRect = new Rect(scrollOffsetX, offset + scrollOffsetY, arrangeWidth, childSize.Height);
                 offset += childSize.Height;
             }
             else
             {
-                childRect = new Rect(offset + scrollOffsetX, scrollOffsetY, childSize.Width, finalSize.Height);
+                childRect = new Rect(offset + scrollOffsetX, scrollOffsetY, childSize.Width, arrangeHeight);
                 offset += childSize.Width;
             }
 

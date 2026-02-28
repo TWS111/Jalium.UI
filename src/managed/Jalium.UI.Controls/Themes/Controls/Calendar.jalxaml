@@ -91,6 +91,8 @@
         <Setter Property="Padding" Value="8,6,8,6" />
         <Setter Property="CornerRadius" Value="4" />
         <Setter Property="FontSize" Value="14" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
 
         <Style.Triggers>
             <PropertyTrigger Property="IsMouseOver" Value="True">

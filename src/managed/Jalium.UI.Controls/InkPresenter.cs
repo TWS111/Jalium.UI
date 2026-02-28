@@ -1,4 +1,4 @@
-using Jalium.UI.Controls.Ink;
+﻿using Jalium.UI.Controls.Ink;
 using Jalium.UI.Documents;
 using Jalium.UI.Media;
 
@@ -9,6 +9,8 @@ namespace Jalium.UI.Controls;
 /// </summary>
 public sealed class InkPresenter : Decorator
 {
+    private readonly List<Visual> _attachedVisuals = [];
+
     /// <summary>
     /// Identifies the Strokes dependency property.
     /// </summary>
@@ -25,6 +27,27 @@ public sealed class InkPresenter : Decorator
         set => SetValue(StrokesProperty, value);
     }
 
+    /// <inheritdoc/>
+    public override int VisualChildrenCount => base.VisualChildrenCount + _attachedVisuals.Count;
+
+    /// <inheritdoc/>
+    public override Visual? GetVisualChild(int index)
+    {
+        int baseCount = base.VisualChildrenCount;
+        if (index < baseCount)
+        {
+            return base.GetVisualChild(index);
+        }
+
+        int attachedIndex = index - baseCount;
+        if (attachedIndex >= 0 && attachedIndex < _attachedVisuals.Count)
+        {
+            return _attachedVisuals[attachedIndex];
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(index));
+    }
+
     private static void OnStrokesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is InkPresenter presenter)
@@ -36,7 +59,17 @@ public sealed class InkPresenter : Decorator
     /// </summary>
     public void AttachVisuals(Visual visual, DrawingAttributes drawingAttributes)
     {
-        // Integration point for real-time ink rendering
+        ArgumentNullException.ThrowIfNull(visual);
+        ArgumentNullException.ThrowIfNull(drawingAttributes);
+
+        if (_attachedVisuals.Contains(visual))
+        {
+            return;
+        }
+
+        AddVisualChild(visual);
+        _attachedVisuals.Add(visual);
+        InvalidateVisual();
     }
 
     /// <summary>
@@ -44,6 +77,14 @@ public sealed class InkPresenter : Decorator
     /// </summary>
     public void DetachVisuals(Visual visual)
     {
-        // Remove real-time ink rendering visuals
+        ArgumentNullException.ThrowIfNull(visual);
+
+        if (!_attachedVisuals.Remove(visual))
+        {
+            return;
+        }
+
+        RemoveVisualChild(visual);
+        InvalidateVisual();
     }
 }

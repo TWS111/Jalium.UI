@@ -1,7 +1,11 @@
-using System.Collections.Specialized;
+﻿using System.Collections.Specialized;
 using Jalium.UI.Controls.Ink;
 using Jalium.UI.Input;
+using Jalium.UI.Input.StylusPlugIns;
 using Jalium.UI.Media;
+using InkStylusPoint = Jalium.UI.Controls.Ink.StylusPoint;
+using InkStylusPointCollection = Jalium.UI.Controls.Ink.StylusPointCollection;
+using InputStylusPoints = Jalium.UI.Input.StylusPointCollection;
 
 namespace Jalium.UI.Controls;
 
@@ -12,9 +16,12 @@ public sealed class InkCanvas : FrameworkElement
 {
     #region Private Fields
 
-    private StylusPointCollection? _currentPoints;
+    private InkStylusPointCollection? _currentPoints;
     private Stroke? _currentStroke;
     private bool _isDrawing;
+    private readonly InkPresenter _dynamicInkPresenter = new();
+    private DynamicRenderer _dynamicRenderer;
+    private readonly InkCollectionStylusPlugIn _inkCollectionStylusPlugIn;
 
     /// <summary>
     /// Minimum distance (in pixels) between consecutive points to avoid jitter.
@@ -79,6 +86,16 @@ public sealed class InkCanvas : FrameworkElement
         Strokes = new StrokeCollection();
         DefaultDrawingAttributes = new DrawingAttributes();
 
+        _dynamicRenderer = new DynamicRenderer
+        {
+            DrawingAttributes = DefaultDrawingAttributes.Clone()
+        };
+        _dynamicRenderer.SetInkPresenter(_dynamicInkPresenter);
+
+        _inkCollectionStylusPlugIn = new InkCollectionStylusPlugIn(this);
+        StylusPlugIns.Add(_dynamicRenderer);
+        StylusPlugIns.Add(_inkCollectionStylusPlugIn);
+
         // Reduce anti-aliasing for sharper strokes
         RenderOptions.SetEdgeMode(this, EdgeMode.Aliased);
 
@@ -86,6 +103,10 @@ public sealed class InkCanvas : FrameworkElement
         AddHandler(MouseMoveEvent, new RoutedEventHandler(OnMouseMoveHandler));
         AddHandler(MouseUpEvent, new RoutedEventHandler(OnMouseUpHandler));
         AddHandler(MouseLeaveEvent, new RoutedEventHandler(OnMouseLeaveHandler));
+
+        AddHandler(PreviewStylusDownEvent, new RoutedEventHandler(OnPreviewStylusInputHandler));
+        AddHandler(PreviewStylusMoveEvent, new RoutedEventHandler(OnPreviewStylusInputHandler));
+        AddHandler(PreviewStylusUpEvent, new RoutedEventHandler(OnPreviewStylusInputHandler));
     }
 
     #endregion
@@ -117,6 +138,32 @@ public sealed class InkCanvas : FrameworkElement
     {
         get => (DrawingAttributes?)GetValue(DefaultDrawingAttributesProperty) ?? new DrawingAttributes();
         set => SetValue(DefaultDrawingAttributesProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the dynamic renderer used for real-time stylus preview.
+    /// </summary>
+    public DynamicRenderer DynamicRenderer
+    {
+        get => _dynamicRenderer;
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+
+            if (ReferenceEquals(_dynamicRenderer, value))
+            {
+                return;
+            }
+
+            _dynamicRenderer.SetInkPresenter(null);
+            StylusPlugIns.Remove(_dynamicRenderer);
+
+            _dynamicRenderer = value;
+            _dynamicRenderer.DrawingAttributes = DefaultDrawingAttributes.Clone();
+            _dynamicRenderer.SetInkPresenter(_dynamicInkPresenter);
+            StylusPlugIns.Insert(0, _dynamicRenderer);
+            InvalidateVisual();
+        }
     }
 
     /// <summary>
@@ -224,6 +271,9 @@ public sealed class InkCanvas : FrameworkElement
 
         // Draw the current stroke being drawn
         _currentStroke?.Draw(dc);
+
+        // Draw stylus real-time preview
+        _dynamicRenderer.DrawPreview(dc);
     }
 
     #endregion
@@ -301,14 +351,27 @@ public sealed class InkCanvas : FrameworkElement
         }
     }
 
+    private void OnPreviewStylusInputHandler(object sender, RoutedEventArgs e)
+    {
+        if (e is not StylusEventArgs)
+        {
+            return;
+        }
+
+        if (EditingMode is InkCanvasEditingMode.Ink or InkCanvasEditingMode.EraseByStroke or InkCanvasEditingMode.EraseByPoint)
+        {
+            e.Handled = true;
+        }
+    }
+
     #endregion
 
     #region Drawing Logic
 
     private void StartDrawing(Point position)
     {
-        _currentPoints = new StylusPointCollection();
-        _currentPoints.Add(new StylusPoint(position.X, position.Y));
+        _currentPoints = new InkStylusPointCollection();
+        _currentPoints.Add(new InkStylusPoint(position.X, position.Y));
         _currentStroke = new Stroke(_currentPoints, DefaultDrawingAttributes.Clone());
         _currentStroke.TaperMode = DefaultStrokeTaperMode;
         _isDrawing = true;
@@ -331,7 +394,7 @@ public sealed class InkCanvas : FrameworkElement
         if (distanceSquared < MinPointDistance * MinPointDistance)
             return;
 
-        _currentPoints.Add(new StylusPoint(position.X, position.Y));
+        _currentPoints.Add(new InkStylusPoint(position.X, position.Y));
         InvalidateVisual();
     }
 
@@ -384,6 +447,31 @@ public sealed class InkCanvas : FrameworkElement
         }
     }
 
+    private void EraseStrokesAt(InputStylusPoints points)
+    {
+        foreach (var point in points)
+        {
+            EraseStrokesAt(new Point(point.X, point.Y));
+        }
+    }
+
+    private void CommitStylusStroke(InkStylusPointCollection points)
+    {
+        if (points.Count == 0)
+        {
+            return;
+        }
+
+        var stroke = new Stroke(points, DefaultDrawingAttributes.Clone())
+        {
+            TaperMode = DefaultStrokeTaperMode
+        };
+
+        Strokes.Add(stroke);
+        OnStrokeCollected(new InkCanvasStrokeCollectedEventArgs(stroke));
+        InvalidateVisual();
+    }
+
     #endregion
 
     #region Event Handlers
@@ -423,7 +511,10 @@ public sealed class InkCanvas : FrameworkElement
 
     private static void OnDefaultDrawingAttributesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        // No immediate action needed - new attributes will be used for new strokes
+        if (d is InkCanvas canvas)
+        {
+            canvas._dynamicRenderer.DrawingAttributes = canvas.DefaultDrawingAttributes.Clone();
+        }
     }
 
     private static void OnEditingModeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -440,7 +531,106 @@ public sealed class InkCanvas : FrameworkElement
                 canvas.InvalidateVisual();
             }
 
+            canvas._dynamicRenderer.Reset();
+            canvas._inkCollectionStylusPlugIn.Reset();
             canvas.EditingModeChanged?.Invoke(canvas, new RoutedEventArgs());
+        }
+    }
+
+    private sealed class InkCollectionStylusPlugIn : StylusPlugIn
+    {
+        private readonly InkCanvas _owner;
+        private InkStylusPointCollection? _activeStrokePoints;
+
+        public InkCollectionStylusPlugIn(InkCanvas owner)
+        {
+            _owner = owner ?? throw new ArgumentNullException(nameof(owner));
+        }
+
+        public void Reset()
+        {
+            _activeStrokePoints = null;
+        }
+
+        protected override bool IsActiveForInput(RawStylusInput rawStylusInput)
+        {
+            return _owner.EditingMode is InkCanvasEditingMode.Ink
+                or InkCanvasEditingMode.EraseByStroke
+                or InkCanvasEditingMode.EraseByPoint;
+        }
+
+        protected override void OnStylusDown(RawStylusInput rawStylusInput)
+        {
+            var points = rawStylusInput.GetStylusPoints();
+            switch (_owner.EditingMode)
+            {
+                case InkCanvasEditingMode.Ink:
+                    _activeStrokePoints = ConvertToInkPoints(points);
+                    break;
+                case InkCanvasEditingMode.EraseByStroke:
+                case InkCanvasEditingMode.EraseByPoint:
+                    _owner.EraseStrokesAt(points);
+                    break;
+            }
+
+            rawStylusInput.NotifyWhenProcessed(this);
+        }
+
+        protected override void OnStylusMove(RawStylusInput rawStylusInput)
+        {
+            var points = rawStylusInput.GetStylusPoints();
+            switch (_owner.EditingMode)
+            {
+                case InkCanvasEditingMode.Ink:
+                    _activeStrokePoints ??= new InkStylusPointCollection();
+                    AppendInkPoints(_activeStrokePoints, points);
+                    break;
+                case InkCanvasEditingMode.EraseByStroke:
+                case InkCanvasEditingMode.EraseByPoint:
+                    _owner.EraseStrokesAt(points);
+                    break;
+            }
+
+            rawStylusInput.NotifyWhenProcessed(this);
+        }
+
+        protected override void OnStylusUp(RawStylusInput rawStylusInput)
+        {
+            var points = rawStylusInput.GetStylusPoints();
+            switch (_owner.EditingMode)
+            {
+                case InkCanvasEditingMode.Ink:
+                    _activeStrokePoints ??= new InkStylusPointCollection();
+                    AppendInkPoints(_activeStrokePoints, points);
+                    _owner.CommitStylusStroke(_activeStrokePoints);
+                    _activeStrokePoints = null;
+                    break;
+                case InkCanvasEditingMode.EraseByStroke:
+                case InkCanvasEditingMode.EraseByPoint:
+                    _owner.EraseStrokesAt(points);
+                    break;
+            }
+
+            rawStylusInput.NotifyWhenProcessed(this);
+        }
+
+        protected override void OnStylusDownProcessed(RawStylusInput rawStylusInput) => _owner.InvalidateVisual();
+        protected override void OnStylusMoveProcessed(RawStylusInput rawStylusInput) => _owner.InvalidateVisual();
+        protected override void OnStylusUpProcessed(RawStylusInput rawStylusInput) => _owner.InvalidateVisual();
+
+        private static InkStylusPointCollection ConvertToInkPoints(InputStylusPoints points)
+        {
+            var result = new InkStylusPointCollection(points.Count);
+            AppendInkPoints(result, points);
+            return result;
+        }
+
+        private static void AppendInkPoints(InkStylusPointCollection target, InputStylusPoints points)
+        {
+            foreach (var point in points)
+            {
+                target.Add(new InkStylusPoint(point.X, point.Y, point.PressureFactor));
+            }
         }
     }
 

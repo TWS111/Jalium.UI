@@ -1,4 +1,4 @@
-using Jalium.UI;
+﻿using Jalium.UI;
 
 namespace Jalium.UI.Input;
 
@@ -21,14 +21,39 @@ public class StylusEventArgs : InputEventArgs
     /// </summary>
     public bool Cancel { get; set; }
 
-    public InputStylusPointCollection GetStylusPoints(UIElement? relativeTo)
-        => StylusDevice?.GetStylusPoints(relativeTo) ?? new InputStylusPointCollection();
+    public StylusPointCollection GetStylusPoints(UIElement? relativeTo)
+        => StylusDevice?.GetStylusPoints(relativeTo) ?? new StylusPointCollection();
+
+    protected internal override void InvokeEventHandler(Delegate handler, object target)
+    {
+        if (handler is StylusEventHandler stylusHandler)
+        {
+            stylusHandler(target, this);
+        }
+        else
+        {
+            base.InvokeEventHandler(handler, target);
+        }
+    }
 }
 
 public sealed class StylusDownEventArgs : StylusEventArgs
 {
     public StylusDownEventArgs(StylusDevice stylusDevice, int timestamp) : base(stylusDevice, timestamp) { }
+
     public int TapCount { get; init; } = 1;
+
+    protected internal override void InvokeEventHandler(Delegate handler, object target)
+    {
+        if (handler is StylusDownEventHandler stylusHandler)
+        {
+            stylusHandler(target, this);
+        }
+        else
+        {
+            base.InvokeEventHandler(handler, target);
+        }
+    }
 }
 
 public sealed class StylusButtonEventArgs : StylusEventArgs
@@ -37,7 +62,20 @@ public sealed class StylusButtonEventArgs : StylusEventArgs
     {
         StylusButton = stylusButton;
     }
+
     public StylusButton StylusButton { get; }
+
+    protected internal override void InvokeEventHandler(Delegate handler, object target)
+    {
+        if (handler is StylusButtonEventHandler stylusHandler)
+        {
+            stylusHandler(target, this);
+        }
+        else
+        {
+            base.InvokeEventHandler(handler, target);
+        }
+    }
 }
 
 public sealed class StylusSystemGestureEventArgs : StylusEventArgs
@@ -46,7 +84,20 @@ public sealed class StylusSystemGestureEventArgs : StylusEventArgs
     {
         SystemGesture = systemGesture;
     }
+
     public SystemGesture SystemGesture { get; }
+
+    protected internal override void InvokeEventHandler(Delegate handler, object target)
+    {
+        if (handler is StylusSystemGestureEventHandler stylusHandler)
+        {
+            stylusHandler(target, this);
+        }
+        else
+        {
+            base.InvokeEventHandler(handler, target);
+        }
+    }
 }
 
 public enum SystemGesture
@@ -75,14 +126,14 @@ public static class Stylus
     public static readonly RoutedEvent PreviewStylusDownEvent = UIElement.PreviewStylusDownEvent.AddOwner(typeof(UIElement));
     public static readonly RoutedEvent PreviewStylusMoveEvent = UIElement.PreviewStylusMoveEvent.AddOwner(typeof(UIElement));
     public static readonly RoutedEvent PreviewStylusUpEvent = UIElement.PreviewStylusUpEvent.AddOwner(typeof(UIElement));
-    public static readonly RoutedEvent StylusInAirMoveEvent = EventManager.RegisterRoutedEvent("StylusInAirMove", RoutingStrategy.Bubble, typeof(StylusEventHandler), typeof(Stylus));
-    public static readonly RoutedEvent StylusEnterEvent = EventManager.RegisterRoutedEvent("StylusEnter", RoutingStrategy.Direct, typeof(StylusEventHandler), typeof(Stylus));
-    public static readonly RoutedEvent StylusLeaveEvent = EventManager.RegisterRoutedEvent("StylusLeave", RoutingStrategy.Direct, typeof(StylusEventHandler), typeof(Stylus));
-    public static readonly RoutedEvent StylusInRangeEvent = EventManager.RegisterRoutedEvent("StylusInRange", RoutingStrategy.Bubble, typeof(StylusEventHandler), typeof(Stylus));
-    public static readonly RoutedEvent StylusOutOfRangeEvent = EventManager.RegisterRoutedEvent("StylusOutOfRange", RoutingStrategy.Bubble, typeof(StylusEventHandler), typeof(Stylus));
-    public static readonly RoutedEvent StylusSystemGestureEvent = EventManager.RegisterRoutedEvent("StylusSystemGesture", RoutingStrategy.Bubble, typeof(StylusSystemGestureEventHandler), typeof(Stylus));
-    public static readonly RoutedEvent StylusButtonDownEvent = EventManager.RegisterRoutedEvent("StylusButtonDown", RoutingStrategy.Bubble, typeof(StylusButtonEventHandler), typeof(Stylus));
-    public static readonly RoutedEvent StylusButtonUpEvent = EventManager.RegisterRoutedEvent("StylusButtonUp", RoutingStrategy.Bubble, typeof(StylusButtonEventHandler), typeof(Stylus));
+    public static readonly RoutedEvent StylusInAirMoveEvent = UIElement.StylusInAirMoveEvent.AddOwner(typeof(UIElement));
+    public static readonly RoutedEvent StylusEnterEvent = UIElement.StylusEnterEvent.AddOwner(typeof(UIElement));
+    public static readonly RoutedEvent StylusLeaveEvent = UIElement.StylusLeaveEvent.AddOwner(typeof(UIElement));
+    public static readonly RoutedEvent StylusInRangeEvent = UIElement.StylusInRangeEvent.AddOwner(typeof(UIElement));
+    public static readonly RoutedEvent StylusOutOfRangeEvent = UIElement.StylusOutOfRangeEvent.AddOwner(typeof(UIElement));
+    public static readonly RoutedEvent StylusSystemGestureEvent = UIElement.StylusSystemGestureEvent.AddOwner(typeof(UIElement));
+    public static readonly RoutedEvent StylusButtonDownEvent = UIElement.StylusButtonDownEvent.AddOwner(typeof(UIElement));
+    public static readonly RoutedEvent StylusButtonUpEvent = UIElement.StylusButtonUpEvent.AddOwner(typeof(UIElement));
 
     public static readonly DependencyProperty IsFlicksEnabledProperty =
         DependencyProperty.RegisterAttached("IsFlicksEnabled", typeof(bool), typeof(Stylus), new PropertyMetadata(true));

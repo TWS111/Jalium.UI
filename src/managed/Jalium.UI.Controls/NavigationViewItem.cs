@@ -158,11 +158,21 @@ public sealed class NavigationViewItem : ContentControl
         // Sync initial state
         UpdateIndent();
         UpdateChevronVisibility();
+        SyncExpandedVisualState();
+    }
 
-        // Sync expanded state (IsExpanded may have been set before template was applied)
-        if (_childrenPanel != null && IsExpanded)
+    /// <inheritdoc />
+    protected override void OnVisualParentChanged(Visual? oldParent)
+    {
+        base.OnVisualParentChanged(oldParent);
+
+        // IsExpanded may be set before the item is attached to a window.
+        // Re-sync once attached so layout/render is guaranteed to update.
+        if (VisualParent != null)
         {
-            _childrenPanel.Visibility = Visibility.Visible;
+            SyncExpandedVisualState();
+            InvalidateMeasure();
+            InvalidateVisual();
         }
     }
 
@@ -266,6 +276,28 @@ public sealed class NavigationViewItem : ContentControl
         if (_chevron != null)
         {
             _chevron.Visibility = HasUnrealizedChildren ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    internal void RefreshHierarchyVisualState()
+    {
+        UpdateChevronVisibility();
+        SyncExpandedVisualState();
+    }
+
+    private void SyncExpandedVisualState()
+    {
+        if (_childrenPanel != null)
+        {
+            _childrenPanel.Visibility = IsExpanded ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (_chevron != null)
+        {
+            var rotateTransform = _chevron.RenderTransform as RotateTransform ?? new RotateTransform();
+            rotateTransform.Angle = IsExpanded ? 90 : 0;
+            _chevron.RenderTransform = rotateTransform;
+            _chevron.InvalidateVisual();
         }
     }
 

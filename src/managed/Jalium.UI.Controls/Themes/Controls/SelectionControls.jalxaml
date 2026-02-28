@@ -39,7 +39,18 @@
                                                           Content="{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType=ComboBox}}"
                                                           ContentTemplate="{Binding SelectionBoxItemTemplate, RelativeSource={RelativeSource AncestorType=ComboBox}}"
                                                           HorizontalAlignment="Left"
-                                                          VerticalAlignment="Center"/>
+                                                          VerticalAlignment="Center">
+                                            <ContentPresenter.Resources>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                                    <Setter Property="TextWrapping" Value="NoWrap" />
+                                                </Style>
+                                                <Style TargetType="AccessText">
+                                                    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                                    <Setter Property="TextWrapping" Value="NoWrap" />
+                                                </Style>
+                                            </ContentPresenter.Resources>
+                                        </ContentPresenter>
                                         <Path Grid.Column="1"
                                               Data="F1 M 0,0 L 2.667,2.66665 L 5.3334,0 L 5.3334,-1.78168 L 2.6667,0.88501 L0,-1.78168 L0,0 Z"
                                               Fill="{StaticResource TextSecondary}"
@@ -101,7 +112,18 @@
                         Background="{TemplateBinding Background}"
                         CornerRadius="4"
                         Padding="{TemplateBinding Padding}">
-                    <ContentPresenter VerticalAlignment="Center" />
+                    <ContentPresenter VerticalAlignment="Center">
+                        <ContentPresenter.Resources>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                <Setter Property="TextWrapping" Value="NoWrap" />
+                            </Style>
+                            <Style TargetType="AccessText">
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                <Setter Property="TextWrapping" Value="NoWrap" />
+                            </Style>
+                        </ContentPresenter.Resources>
+                    </ContentPresenter>
                 </Border>
             </ControlTemplate>
         </Setter>

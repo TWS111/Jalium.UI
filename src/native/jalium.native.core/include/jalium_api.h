@@ -135,6 +135,24 @@ JALIUM_API void jalium_render_target_add_dirty_rect(JaliumRenderTarget* rt, floa
 /// @param rt The render target.
 JALIUM_API void jalium_render_target_set_full_invalidation(JaliumRenderTarget* rt);
 
+/// Creates a composition visual node for embedding external content (e.g. WebView).
+/// On Windows this returns an IUnknown* pointer in visual_out.
+/// Caller must eventually destroy it via jalium_render_target_destroy_webview_visual.
+/// @param rt The render target.
+/// @param visual_out Output visual pointer.
+/// @return JALIUM_OK on success.
+JALIUM_API JaliumResult jalium_render_target_create_webview_visual(
+    JaliumRenderTarget* rt,
+    void** visual_out);
+
+/// Destroys a composition visual previously created by jalium_render_target_create_webview_visual.
+/// @param rt The render target.
+/// @param visual The visual pointer to destroy.
+/// @return JALIUM_OK on success.
+JALIUM_API JaliumResult jalium_render_target_destroy_webview_visual(
+    JaliumRenderTarget* rt,
+    void* visual);
+
 // ============================================================================
 // Drawing Commands
 // ============================================================================

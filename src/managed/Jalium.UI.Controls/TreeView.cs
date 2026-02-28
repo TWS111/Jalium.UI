@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Reflection;
 using Jalium.UI.Input;
+using Jalium.UI.Media;
 
 namespace Jalium.UI.Controls;
 
@@ -416,11 +417,27 @@ public class TreeViewItem : HeaderedItemsControl
                 }
             }
 
-            // Sync expanded state (IsExpanded may have been set before template was applied)
-            if (IsExpanded)
-            {
-                _itemsHost.Visibility = Visibility.Visible;
-            }
+            // Sync expanded visuals (IsExpanded may have been set before template was applied)
+            SyncExpandedVisualState();
+        }
+        else
+        {
+            SyncExpandedVisualState();
+        }
+    }
+
+    /// <inheritdoc />
+    protected override void OnVisualParentChanged(Visual? oldParent)
+    {
+        base.OnVisualParentChanged(oldParent);
+
+        // IsExpanded may be set before the item is attached to a window.
+        // Re-sync once attached so layout/render is guaranteed to update.
+        if (VisualParent != null)
+        {
+            SyncExpandedVisualState();
+            InvalidateMeasure();
+            InvalidateVisual();
         }
     }
 
@@ -519,6 +536,32 @@ public class TreeViewItem : HeaderedItemsControl
         if (_expanderBorder != null)
         {
             _expanderBorder.Visibility = HasItems ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // When children are realized after template application, keep glyph direction
+        // in sync with the current expanded state.
+        if (_expanderArrow != null)
+        {
+            var rotateTransform = _expanderArrow.RenderTransform as RotateTransform ?? new RotateTransform();
+            rotateTransform.Angle = IsExpanded ? 90 : 0;
+            _expanderArrow.RenderTransform = rotateTransform;
+            _expanderArrow.InvalidateVisual();
+        }
+    }
+
+    private void SyncExpandedVisualState()
+    {
+        if (_itemsHost != null)
+        {
+            _itemsHost.Visibility = IsExpanded ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (_expanderArrow != null)
+        {
+            var rotateTransform = _expanderArrow.RenderTransform as RotateTransform ?? new RotateTransform();
+            rotateTransform.Angle = IsExpanded ? 90 : 0;
+            _expanderArrow.RenderTransform = rotateTransform;
+            _expanderArrow.InvalidateVisual();
         }
     }
 

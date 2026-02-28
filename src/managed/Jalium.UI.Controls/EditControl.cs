@@ -10,7 +10,7 @@ namespace Jalium.UI.Controls;
 /// A code editor control with syntax highlighting, line numbers, and efficient text rendering.
 /// Uses a Rope-based document model and renders directly via DrawingContext.
 /// </summary>
-public class EditControl : Control, IImeSupport
+public class EditControl : Control, IImeSupport, IEditorViewMetrics
 {
     #region Static Brushes
 
@@ -4869,6 +4869,44 @@ public class EditControl : Control, IImeSupport
     {
         double verticalTarget = _isScrollAnimating ? _scrollAnimationTargetVerticalOffset : _view.VerticalOffset;
         SetScrollOffsets(verticalTarget, horizontalOffset, allowAnimation, userInitiated);
+    }
+
+    double IEditorViewMetrics.VerticalOffset => _view.VerticalOffset;
+
+    double IEditorViewMetrics.HorizontalOffset => _view.HorizontalOffset;
+
+    double IEditorViewMetrics.LineHeight => _view.LineHeight;
+
+    double IEditorViewMetrics.ViewportWidth => _view.ViewportWidth;
+
+    double IEditorViewMetrics.LineNumberAreaLeft => _view.LineNumberAreaLeft;
+
+    double IEditorViewMetrics.GutterWidth => _view.GutterWidth;
+
+    double IEditorViewMetrics.FoldingLaneLeft => _view.FoldingLaneLeft;
+
+    double IEditorViewMetrics.TextAreaLeft => _view.TextAreaLeft;
+
+    int IEditorViewMetrics.FirstVisibleLineNumber => _view.FirstVisibleLineNumber;
+
+    Rect IEditorViewMetrics.MinimapRect => _minimapRect;
+
+    Rect IEditorViewMetrics.VerticalScrollTrackRect => _verticalScrollTrackRect;
+
+    Point IEditorViewMetrics.GetPointFromOffset(int offset, bool showLineNumbers)
+    {
+        int clampedOffset = Math.Clamp(offset, 0, _document.TextLength);
+        return _view.GetPointFromOffset(clampedOffset, showLineNumbers);
+    }
+
+    double IEditorViewMetrics.GetAbsoluteLineTop(int lineNumber)
+    {
+        return _view.GetAbsoluteLineTop(lineNumber);
+    }
+
+    void IEditorViewMetrics.SetVerticalOffset(double verticalOffset, bool allowAnimation, bool userInitiated)
+    {
+        SetVerticalOffset(verticalOffset, allowAnimation, userInitiated);
     }
 
     private void SetScrollOffsets(double verticalOffset, double horizontalOffset, bool allowAnimation, bool userInitiated)

@@ -60,6 +60,23 @@ class RenderTarget {
 public:
     virtual ~RenderTarget() = default;
 
+    /// Creates a composition visual node that can host embedded content (e.g. WebView).
+    /// The returned pointer is backend-specific (IUnknown* on Windows) and reference-counted.
+    virtual JaliumResult CreateWebViewVisual(void** visualOut)
+    {
+        if (visualOut) {
+            *visualOut = nullptr;
+        }
+        return JALIUM_ERROR_NOT_SUPPORTED;
+    }
+
+    /// Destroys a previously created composition visual node.
+    virtual JaliumResult DestroyWebViewVisual(void* visual)
+    {
+        (void)visual;
+        return JALIUM_ERROR_NOT_SUPPORTED;
+    }
+
     /// Resizes the render target.
     virtual JaliumResult Resize(int32_t width, int32_t height) = 0;
 
